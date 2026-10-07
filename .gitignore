@@ -1,9 +1,9 @@
-*~
-plan/
-/target
-/dist
-/corpus
-/log
+target/
+Cargo.lock
+**/*.rs.bk
+*.swp
 .DS_Store
-# A craft-fonts checkout for CRAFT_FONTS_DIR (CI and release workflows check it out here)
-/craft-fonts
+
+# Demonstration artifacts
+/brag/
+brag/
