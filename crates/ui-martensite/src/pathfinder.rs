@@ -13,12 +13,7 @@ pub struct PathfinderEngine;
 impl PathfinderEngine {
     pub fn combine_bounding_boxes(op: BooleanOp, a: [f32; 4], b: [f32; 4]) -> Option<[f32; 4]> {
         match op {
-            BooleanOp::Unite => Some([
-                a[0].min(b[0]),
-                a[1].min(b[1]),
-                a[2].max(b[2]),
-                a[3].max(b[3]),
-            ]),
+            BooleanOp::Unite => Some([a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]),
             BooleanOp::Intersect => {
                 let x0 = a[0].max(b[0]);
                 let y0 = a[1].max(b[1]);

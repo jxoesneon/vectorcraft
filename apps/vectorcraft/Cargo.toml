@@ -19,7 +19,10 @@ windows7 = ["eframe/glow"]
 
 [dependencies]
 vectorcraft-engine = { workspace = true }
+vectorcraft-ui-martensite = { path = "../../crates/ui-martensite" }
 vectorcraft-ui-egui = { workspace = true }
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 eframe = { workspace = true, features = ["default_fonts", "wayland", "x11"] }
 egui = { workspace = true }
 serde_json = { workspace = true }

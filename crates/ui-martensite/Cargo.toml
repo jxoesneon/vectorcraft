@@ -3,9 +3,14 @@ name = "vectorcraft-ui-martensite"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Sovereign retained-mode vector illustration user interface for VectorCraft powered by Martensite"
+description = "Sovereign retained-mode, GPU-accelerated graphical user interface for VectorCraft powered by Martensite"
 
 [dependencies]
+vectorcraft-engine = { path = "../engine" }
+vectorcraft-doc = { path = "../doc" }
+vectorcraft-geom = { path = "../geom" }
+vectorcraft-color = { path = "../color" }
+
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tracing.workspace = true

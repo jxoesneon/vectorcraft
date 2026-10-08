@@ -56,6 +56,30 @@ impl From<vectorcraft_doc::DocError> for EngineError {
 
 pub type Result<T> = std::result::Result<T, EngineError>;
 
+/// The application engine: documents, commands, history and tool state.
+/// Named `Engine` so UIs (egui, Martensite, headless) refer to one type.
+pub type Engine = Session;
+
+/// Toolbox tool identity, in Illustrator order. UI-agnostic so every front-end
+/// shares the canonical list; each UI maps it to its own presentation and to the
+/// tool id [`vectorcraft_tools::create`] understands (`"selection"`, `"pen"`, …).
+/// Named `ToolId` because [`Tool`] is the interactive-tool trait.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ToolId {
+    Selection,
+    DirectSelection,
+    Pen,
+    AnchorConvert,
+    Type,
+    Rectangle,
+    Ellipse,
+    ShapeBuilder,
+    Rotate,
+    Scale,
+    Hand,
+    Zoom,
+}
+
 /// One undo step.
 #[derive(Clone, Debug)]
 pub struct HistoryEntry {
