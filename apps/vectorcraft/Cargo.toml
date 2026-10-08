@@ -36,3 +36,8 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 [build-dependencies]
 # Icon + VERSIONINFO for vectorcraft.exe; build.rs only uses it when targeting Windows.
 winresource = "0.1"
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/vectorcraft", dest = "/usr/bin/vectorcraft", mode = "755" }
+]
