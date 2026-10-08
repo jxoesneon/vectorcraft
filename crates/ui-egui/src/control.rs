@@ -77,6 +77,13 @@ pub fn inspect(app: &VectorcraftApp, ctx: &egui::Context) -> Value {
         "tool": app.session.tool_id(),
         "toolOptions": app.session.tool_options(),
         "ui": serde_json::to_value(&app.ui).unwrap_or_default(),
+        // Not saved with the UI state, so not in `ui`: 0 normal … 3 Presentation Mode.
+        "screenMode": app.ui.screen_mode,
+        // The Contextual Task Bar: pinned (not saved either) and where it shows.
+        "taskBar": {
+            "pinned": app.ui.task_bar_place.pinned,
+            "rect": crate::canvas::task_bar_rect(ctx).map(|r| json!([r.left(), r.top(), r.width(), r.height()])),
+        },
         "view": app.view().map(|v| serde_json::to_value(v).unwrap_or_default()),
         "canvasRect": app.canvas_rect.map(|c| json!([c.left(), c.top(), c.width(), c.height()])),
         "window": [r.width(), r.height()],

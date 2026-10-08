@@ -1,11 +1,13 @@
-//! The Selection tool (V): click/shift-click, marquee, move (Alt copies, Shift constrains; Smart
+//! The Selection tool (V): click/shift-click, marquee (Shift-drag toggles the objects it reaches:
+//! the selected ones are deselected, the others selected), move (Alt copies, Shift constrains; Smart
 //! Guides, or with them off View › Snap to Point, snap it),
 //! bounding-box scale (Shift proportional, Alt from centre) and rotate (outside corners, Shift 45°),
 //! drag a live rectangle's corner widget to round its corners (Alt-click cycles their kind,
 //! double-click opens the Corners dialog), double-click to enter isolation mode (Double Click To
 //! Isolate), Cmd/Ctrl-click to select the object behind (Command Click to Select Objects Behind),
 //! click or drag a ruler guide ([`crate::rulerguide`]), drag the brackets of type on a path
-//! ([`crate::pathtype`]).
+//! ([`crate::pathtype`]), double-click the type widget to convert point type to area type and back
+//! ([`crate::typewidget`]).
 //! The bounding box stands at the selection's own angle after a rotation, so its handles scale
 //! along the objects' axes. A handle drag resizes area type's frame (the type area) instead of
 //! scaling its type: the text reflows at its size.
@@ -20,6 +22,7 @@ use crate::corners::{self, CornerDrag, over_widget};
 use crate::guides::Targets;
 use crate::pathtype::{self, BracketDrag, over_bracket};
 use crate::rulerguide::GuideEdit;
+use crate::typewidget;
 use crate::{Action, Cursor, Mods, Overlay, PointerEvent, PointerKind, Tool, ToolContext, json_ids};
 
 #[derive(Clone, Debug, Default)]
@@ -47,7 +50,8 @@ enum State {
     Marquee {
         start: Point,
         cur: Point,
-        add: bool,
+        /// Shift: the objects inside leave the selection if selected, else join it.
+        toggle: bool,
     },
     /// Dragging a Live Corners widget.
     Corner(CornerDrag),
@@ -80,7 +84,7 @@ impl MoveSnap {
     pub(crate) fn new(cx: &ToolContext) -> Self {
         Self {
             bounds: selection_bounds(cx),
-            targets: cx.smart_guides.then(|| Targets::collect(cx.doc, &cx.selection.objects, None)),
+            targets: cx.smart_guides.then(|| Targets::collect(cx.doc, &cx.selection.objects, None).styled(cx)),
             points: Targets::snap_to_point(cx, &cx.selection.objects),
         }
     }
@@ -94,7 +98,7 @@ impl MoveSnap {
             guides = ov;
         }
         if let (Some(t), Some(b)) = (&self.targets, self.bounds) {
-            let (adj, ov) = t.snap_rect(b + d, cx.tol(5.0));
+            let (adj, ov) = t.snap_rect(b + d, cx.snap_tol());
             d += adj;
             guides = ov;
         }
@@ -165,7 +169,7 @@ impl Tool for SelectionTool {
         match (ev.kind, self.state.clone()) {
             (PointerKind::DoubleClick, _) => {
                 self.state = State::Idle;
-                if let Some(a) = corners::double_click(cx, p) {
+                if let Some(a) = corners::double_click(cx, p).or_else(|| typewidget::double_click(cx, p)) {
                     return vec![a];
                 }
                 if crate::rulerguide::guide_at(cx, p).is_some() {
@@ -195,6 +199,11 @@ impl Tool for SelectionTool {
                     self.state = State::Bracket(b);
                     return vec![];
                 }
+                // The type widget answers a double-click only: its clicks neither drag nor deselect.
+                if typewidget::over_widget(cx, p) {
+                    self.state = State::Idle;
+                    return vec![];
+                }
                 if cx.show_bbox
                     && let Some(bx) = selection_box(cx)
                 {
@@ -205,7 +214,7 @@ impl Tool for SelectionTool {
                             // Only area type: the step resizes type areas; anything else scales.
                             let label = if areas && cx.selection.objects.iter().all(is_area) { "Resize Type Area" } else { "Scale" };
                             // Smart Guides align what the handle moves with the other objects.
-                            self.targets = cx.smart_guides.then(|| Targets::collect(cx.doc, &cx.selection.objects, None));
+                            self.targets = cx.smart_guides.then(|| Targets::collect(cx.doc, &cx.selection.objects, None).styled(cx));
                             self.state = State::Scaling { handle, bx, areas };
                             return vec![Action::Begin(label.into())];
                         }
@@ -249,7 +258,7 @@ impl Tool for SelectionTool {
                         out
                     }
                     None => {
-                        self.state = State::Marquee { start: p, cur: p, add: m.shift };
+                        self.state = State::Marquee { start: p, cur: p, toggle: m.shift };
                         vec![]
                     }
                 }
@@ -268,7 +277,7 @@ impl Tool for SelectionTool {
                     (d, self.guides) = snap.snap(cx, start, d);
                 }
                 self.state = State::Moving { start, began: true, deselect: None };
-                self.measure = Some((p, cx.offset_label(d.x, d.y)));
+                self.measure = cx.measurement_labels.then(|| (p, cx.offset_label(d.x, d.y)));
                 out.push(Action::Preview("object.transform".into(), json!({ "matrix": matrix_json(Affine::translate(d)), "copy": m.alt })));
                 out
             }
@@ -277,10 +286,10 @@ impl Tool for SelectionTool {
                 let mut a = scale_for_drag(bx.rect, handle, bx.to_local(p), m.shift, m.alt);
                 self.guides.clear();
                 if let Some(t) = &self.targets {
-                    (a, self.guides) = t.snap_scale(&bx, handle, a, m.shift, m.alt, cx.tol(5.0));
+                    (a, self.guides) = t.snap_scale(&bx, handle, a, m.shift, m.alt, cx.snap_tol());
                 }
                 let nr = a.transform_rect_bbox(bx.rect);
-                self.measure = Some((p, cx.size_label(nr.width(), nr.height())));
+                self.measure = cx.transform_tools_guides.then(|| (p, cx.size_label(nr.width(), nr.height())));
                 let mut params = json!({ "matrix": matrix_json(bx.conjugate(a)), "copy": false });
                 if areas {
                     params["typeAreas"] = json!(true);
@@ -289,11 +298,11 @@ impl Tool for SelectionTool {
             }
             (PointerKind::Drag, State::Rotating { center, start, .. }) => {
                 let (a, deg) = rotate_for_drag(center, start, p, m.shift);
-                self.measure = Some((p, format!("{:.1}°", -deg)));
+                self.measure = cx.transform_tools_guides.then(|| (p, format!("{:.1}°", -deg)));
                 vec![Action::Preview("object.transform".into(), json!({ "matrix": matrix_json(a), "copy": false }))]
             }
-            (PointerKind::Drag, State::Marquee { start, add, .. }) => {
-                self.state = State::Marquee { start, cur: p, add };
+            (PointerKind::Drag, State::Marquee { start, toggle, .. }) => {
+                self.state = State::Marquee { start, cur: p, toggle };
                 vec![]
             }
             (PointerKind::Drag, State::Corner(mut c)) => {
@@ -332,18 +341,14 @@ impl Tool for SelectionTool {
                 self.targets = None;
                 vec![Action::Commit]
             }
-            (PointerKind::Up, State::Marquee { start, add, .. }) => {
+            (PointerKind::Up, State::Marquee { start, toggle, .. }) => {
                 self.state = State::Idle;
                 let r = Rect::from_points(start, p);
                 if r.width() < Self::drag_threshold(cx) && r.height() < Self::drag_threshold(cx) {
-                    return if add { vec![] } else { vec![Action::Exec("select.none".into(), json!({}))] };
+                    return if toggle { vec![] } else { vec![Action::Exec("select.none".into(), json!({}))] };
                 }
                 let ids: Vec<NodeId> = marquee(cx.doc, r, cx.isolation, false);
-                if add {
-                    vec![Action::Exec("select.add".into(), json!({ "ids": json_ids(&ids) }))]
-                } else {
-                    vec![Action::Exec("select.set".into(), json!({ "ids": json_ids(&ids) }))]
-                }
+                vec![Action::Exec(if toggle { "select.toggle" } else { "select.set" }.into(), json!({ "ids": json_ids(&ids) }))]
             }
             _ => vec![],
         }
@@ -381,6 +386,9 @@ impl Tool for SelectionTool {
         }
         if over_bracket(cx, p) {
             return Cursor::PathBracket;
+        }
+        if typewidget::over_widget(cx, p) {
+            return Cursor::TypeWidget;
         }
         if cx.show_bbox
             && let Some(bx) = selection_box(cx)
@@ -457,7 +465,7 @@ mod tests {
     #[test]
     fn a_press_on_a_ruler_guide_picks_it_over_the_art() {
         let (mut d, _) = doc_with_rect();
-        d.guides.push(vectorcraft_doc::Guide { vertical: false, pos: 150.0 });
+        d.guides.push(vectorcraft_doc::Guide::new(false, 150.0));
         let s = Selection::default();
         let p = paint();
         let cx = cx(&d, &s, &p);
@@ -546,6 +554,24 @@ mod tests {
         assert_eq!(a, vec![Action::Exec("select.set".into(), json!({"ids": [id.0]}))]);
     }
 
+    /// Shift-drag a marquee: the objects it reaches toggle (#483), so selected ones can be
+    /// taken out of the selection; a Shift-click on empty canvas leaves the selection alone.
+    #[test]
+    fn shift_marquee_toggles() {
+        let (d, id) = doc_with_rect();
+        let s = Selection::default();
+        let p = paint();
+        let cx = cx(&d, &s, &p);
+        let mut t = SelectionTool::default();
+        let shift = Mods { shift: true, ..Default::default() };
+        t.pointer(&cx, &ev(PointerKind::Down, 50.0, 50.0).with_mods(shift));
+        t.pointer(&cx, &ev(PointerKind::Drag, 120.0, 120.0).with_mods(shift));
+        let a = t.pointer(&cx, &ev(PointerKind::Up, 120.0, 120.0).with_mods(shift));
+        assert_eq!(a, vec![Action::Exec("select.toggle".into(), json!({"ids": [id.0]}))]);
+        t.pointer(&cx, &ev(PointerKind::Down, 50.0, 50.0).with_mods(shift));
+        assert!(t.pointer(&cx, &ev(PointerKind::Up, 50.0, 50.0).with_mods(shift)).is_empty());
+    }
+
     #[test]
     fn handle_drag_scales() {
         let (d, id) = doc_with_rect();
@@ -590,6 +616,54 @@ mod tests {
         t.pointer(&c, &ev(PointerKind::Down, 275.0, 150.0));
         let a = t.pointer(&c, &ev(PointerKind::Drag, 275.0, 197.0));
         assert!((height(&a) - 97.0).abs() < 1e-9, "{a:?}");
+    }
+
+    /// Smart Guides › Measurement Labels, Transform Tools and Snapping Tolerance (#394): the
+    /// readouts while moving and while scaling each follow their option; the tolerance sets how
+    /// far a dragged handle is pulled.
+    #[test]
+    fn smart_guide_display_preferences_drive_the_readouts_and_the_pull() {
+        use vectorcraft_doc::{Appearance, Node};
+        let (mut d, _) = doc_with_rect();
+        let l = d.layers[0].id;
+        let id = d.alloc_id();
+        d.insert(Some(l), 1, Node::path(id, vectorcraft_geom::shapes::rectangle(Rect::new(250.0, 100.0, 300.0, 150.0)), Appearance::default_art()))
+            .unwrap();
+        let mut s = Selection::default();
+        s.add(id);
+        let p = paint();
+        let measures = |t: &SelectionTool, c: &ToolContext| t.overlays(c).iter().filter(|o| matches!(o, Overlay::Measure { .. })).count();
+        let height = |a: &[Action]| {
+            let Action::Preview(_, v) = &a[0] else { panic!("{a:?}") };
+            v["matrix"][3].as_f64().unwrap() * 50.0
+        };
+        // Moving: the offset readout is a measurement label.
+        for on in [true, false] {
+            let c = ToolContext { measurement_labels: on, ..cx(&d, &s, &p) };
+            let mut t = SelectionTool::default();
+            t.pointer(&c, &ev(PointerKind::Down, 275.0, 125.0));
+            t.pointer(&c, &ev(PointerKind::Drag, 285.0, 135.0));
+            assert_eq!(measures(&t, &c), usize::from(on), "measurement labels {on}");
+            t.pointer(&c, &ev(PointerKind::Up, 285.0, 135.0));
+        }
+        // Scaling by a handle: the size readout belongs to Transform Tools.
+        for on in [true, false] {
+            let c = ToolContext { transform_tools_guides: on, ..cx(&d, &s, &p) };
+            let mut t = SelectionTool::default();
+            t.pointer(&c, &ev(PointerKind::Down, 275.0, 150.0));
+            t.pointer(&c, &ev(PointerKind::Drag, 275.0, 180.0));
+            assert_eq!(measures(&t, &c), usize::from(on), "transform tools {on}");
+            t.pointer(&c, &ev(PointerKind::Up, 275.0, 180.0));
+        }
+        // Snapping Tolerance: 6 px from the neighbour's bottom edge is beyond 4, within 8.
+        for (tol, want) in [(4.0, 94.0), (8.0, 100.0), (0.0, 94.0)] {
+            let c = ToolContext { snapping_tolerance: tol, ..cx(&d, &s, &p) };
+            let mut t = SelectionTool::default();
+            t.pointer(&c, &ev(PointerKind::Down, 275.0, 150.0));
+            let a = t.pointer(&c, &ev(PointerKind::Drag, 275.0, 194.0));
+            assert!((height(&a) - want).abs() < 1e-9, "tolerance {tol}: {a:?}");
+            t.pointer(&c, &ev(PointerKind::Up, 275.0, 194.0));
+        }
     }
 
     #[test]

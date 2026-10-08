@@ -421,6 +421,8 @@ pub struct Prefs {
     pub units_stroke: String,
     pub units_type: String,
     pub units_asian_type: String,
+    /// Numbers Without Units Are Points: a number typed with no unit into a length field in picas
+    /// is read in points (on by default; the reference app dims it unless a unit is Picas).
     pub numbers_without_units_are_points: bool,
     pub identify_objects_by: String,
     // Guides & Grid
@@ -648,7 +650,7 @@ impl Default for Prefs {
             grid_subdivisions: 8,
             grids_in_back: true,
             show_pixel_grid: true,
-            smart_guide_color: s("#ff4af0"),
+            smart_guide_color: s("#ff3dfc"),
             alignment_guides: true,
             object_highlighting: true,
             transform_tools_guides: true,
@@ -798,6 +800,8 @@ pub struct Session {
     pub(crate) liquify_stroke: Option<Box<cmd::distortcmds::LiquifyStroke>>,
     /// A press on the Plane Switching Widget is under way: its drag and release are the widget's.
     pub(crate) plane_widget_press: bool,
+    /// A guide being dragged out of a ruler ([`Session::ruler_guide`]).
+    pub(crate) ruler_guide: Option<vectorcraft_tools::rulerguide::NewGuide>,
 }
 
 impl Default for Session {
@@ -842,6 +846,7 @@ impl Session {
             envelope_defaults: None,
             liquify_stroke: None,
             plane_widget_press: false,
+            ruler_guide: None,
         }
     }
 

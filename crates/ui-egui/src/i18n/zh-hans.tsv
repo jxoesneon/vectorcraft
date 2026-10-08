@@ -126,6 +126,7 @@
 	Anchor Points	锚点
 	Anchor Points, Handle, and Bounding Box Display	锚点、手柄和定界框显示
 	Anchor/Path Labels	锚点/路径标签
+	Anchors:	锚点：
 	Angle	角度
 	Angle:	角度：
 	Angles	角度
@@ -248,6 +249,8 @@
 	Bottom	下
 	Bottom in Front	下方置前
 	Bottom-to-Bottom Leading	基线至基线行距
+	Burasagari	标点悬挂
+	Force	强制
 	Bottom:	下：
 	Bounds	边界
 	Bounds (Fill Proportionally)	边界 (按比例填满)
@@ -426,12 +429,15 @@
 	Compression:	压缩：
 	Condition identifier:	条件识别码：
 	Conflict {n} of {count}	冲突 {n}／{count}
+	Connect Selected End Points	连接所选端点
 	Consolidate All Windows	合并所有窗口
 	Constrain Angle	约束角度
 	Constrain Width and Height Proportions	约束宽高比例
 	Construction Guides	构造参考线
 	Contextual Alternates	上下文替代
 	Contextual Task Bar	上下文任务栏
+	Pin Bar Position	固定任务栏位置
+	Reset Bar Position	重置任务栏位置
 	Contrast	对比
 	Control	控制栏
 	Convert	转换
@@ -443,6 +449,8 @@
 	Convert Color	转换颜色
 	Convert Document Color Mode	转换文档颜色模式
 	Convert Process to Global	将印刷色转换为全局色
+	Convert Selected Anchor Points to Corner	将所选锚点转换为尖角
+	Convert Selected Anchor Points to Smooth	将所选锚点转换为平滑
 	Convert text to outlines	将文字转换为轮廓
 	Convert To Area Type	转换为区域文字
 	Convert to Artboards	转换为画板
@@ -453,6 +461,7 @@
 	Convert to RGB	转换为 RGB
 	Convert to Shape	转换为形状
 	Convert to sRGB	转换为 sRGB
+	Convert:	转换：
 	Copied the CSS of {rules} object(s)	已复制 {rules} 个对象的 CSS
 	Copies:	份数：
 	Copy	复制
@@ -473,6 +482,7 @@
 	Corner Radius:	圆角半径：
 	Corner:	转角：
 	Corners	转角
+	Cut Path	切割路径
 	Descender	下缘
 	Flip	翻转
 	Round	圆角
@@ -509,6 +519,7 @@
 	Created:	创建时间：
 	Crop	裁剪
 	Crop Image	裁剪图像
+	Mask	蒙版
 	Crop Marks	裁切标记
 	Crop To	裁剪到
 	Crystallize Tool	晶格化工具
@@ -690,6 +701,8 @@
 	Duplicate	复制
 	Duplicate and Offset 10 pt	复制并偏移 10 pt
 	Duplicate Artboard	复制画板
+	Copy Artboard	拷贝画板
+	Cut Artboard	剪切画板
 	Duplicate Artboards	复制画板
 	Duplicate Brush	复制画笔
 	Duplicate Character Style	制作字符样式副本
@@ -1069,7 +1082,9 @@
 	Hide Artboards	隐藏画板
 	Hide Bounding Box	隐藏定界框
 	Hide Code	隐藏代码
-	Hide Contextual Task Bar	隐藏快捷工作列
+	Hide Bar	隐藏任务栏
+	More Options	更多选项
+	Show Properties Panel	显示属性面板
 	Hide Corner Widget	隐藏角控件
 	Hide Corner Widget for angles greater than	角度大于此值时隐藏圆角控件
 	Hide Edges	隐藏边缘
@@ -1127,6 +1142,8 @@
 	Image Map:	图像映射：
 	Image Size	图像大小
 	Image Trace	图像描摹
+	Image Tracing	图像描摹对象
+	Tracing Presets	描摹预设
 	Image Trace Presets	图像描摹预设
 	Image:	图像：
 	Images:	图像：
@@ -2364,7 +2381,7 @@
 	Simplify…	简化…
 	Simulate Colored Paper	模拟有色纸张
 	Simulate Paper	模拟纸张
-	Single / Double Column	单列/双列
+	Double Column	双列
 	Single Left Quotation Mark	左单引号
 	Single Quotes:	单引号：
 	Single Right Quotation Mark	右单引号
@@ -2464,6 +2481,8 @@
 	Stroke (X), double-click for the Color Picker	描边 (X)，双击打开拾色器
 	Stroke Color	描边颜色
 	Stroke Options	描边选项
+	Character:	字符：
+	Character options	字符选项
 	Stroke options	描边选项
 	Stroke Weight	描边粗细
 	Stroke:	描边：
@@ -2601,6 +2620,7 @@
 	Total Width:	总宽度：
 	Touch Type Tool	修饰文字工具
 	Trace	描摹
+	Trace the image with the Default preset	使用“默认”预设描摹图像
 	Tracing	描摹
 	Tracking	字距
 	Trademark Symbol	商标符号

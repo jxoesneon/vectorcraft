@@ -10,12 +10,20 @@
 # names, OpenType, the built-in workspace names and the bracketed perspective grid preset names.
 	About VectorCraft	VectorCraft について
 	All Scripts	すべての文字
+	Anchors:	アンカー:
 	Any Kind	すべての種類
 	Ascender	アセンダ
 	Baseline	ベースライン
 	Bottom-to-Bottom Leading	欧文ベースライン基準の行送り
+	Burasagari	ぶら下がり
+	Force	強制
 	Center	中央
 	Character Alignment	文字揃え
+	Connect Selected End Points	選択した端点を連結
+	Convert Selected Anchor Points to Corner	選択したアンカーポイントをコーナーポイントに変換
+	Convert Selected Anchor Points to Smooth	選択したアンカーポイントをスムーズポイントに変換
+	Convert:	変換:
+	Cut Path	パスをカット
 	Decorative	装飾
 	Descender	ディセンダ
 	Em Box Bottom/Left	仮想ボディの下 / 左
@@ -158,6 +166,7 @@
 	Expand…	分割・拡張…
 	Expand Appearance	アピアランスを分割
 	Crop Image	画像の切り抜き
+	Mask	マスク
 	Rasterize…	ラスタライズ…
 	Create Gradient Mesh…	グラデーションメッシュを作成…
 	Create Object Mosaic…	モザイクオブジェクトを作成…
@@ -222,6 +231,8 @@
 	Merge	結合
 	Gap Options…	間隔オプション…
 	Image Trace	画像トレース
+	Image Tracing	画像トレースオブジェクト
+	Tracing Presets	トレースプリセット
 	Make…	作成…
 	Make and Expand…	作成して拡張…
 	Text Wrap	テキストの回り込み
@@ -500,10 +511,12 @@
 	Manage Workspaces…	ワークスペースを管理…
 	Control	コントロール
 	Contextual Task Bar	コンテキストタスクバー
+	Pin Bar Position	バーの位置を固定
+	Reset Bar Position	バーの位置をリセット
 	Tools	ツール
 	Toolbars	ツールバー
 	Advanced	詳細
-	Single / Double Column	1 列／2 列
+	Double Column	2 列
 	Actions	アクション
 	Asset Export	アセットの書き出し
 	Attributes	属性
@@ -1116,6 +1129,8 @@
 	Drawing Mode	描画モード
 	Duplicate	複製
 	Duplicate Artboard	アートボードを複製
+	Copy Artboard	アートボードをコピー
+	Cut Artboard	アートボードをカット
 	Duplicate Artboards	アートボードを複製
 	Duplicate Brush	ブラシを複製
 	Duplicate Character Style	文字スタイルを複製
@@ -1359,7 +1374,9 @@
 	Height:	高さ:
 	Help › Search Commands…	ヘルプ › コマンドを検索…
 	Hide Code	コードを隠す
-	Hide Contextual Task Bar	コンテキストタスクバーを隠す
+	Hide Bar	バーを隠す
+	More Options	その他のオプション
+	Show Properties Panel	プロパティパネルを表示
 	Hide Corner Widget for angles greater than	次の角度より大きい場合はコーナーウィジェットを隠す
 	Hide Note	メモを隠す
 	Hide Options	オプションを隠す
@@ -2332,6 +2349,8 @@
 	Stop editing the opacity mask	不透明マスクの編集を終了
 	Strikethrough	打ち消し線
 	Stroke Options	線オプション
+	Character:	文字:
+	Character options	文字オプション
 	Stroke options	線オプション
 	Stroke:	線:
 	Style	スタイル
@@ -2415,6 +2434,7 @@
 	Total Width:	合計幅:
 	Touch Type Tool	文字タッチツール
 	Trace	トレース
+	Trace the image with the Default preset	「デフォルト」プリセットで画像をトレース
 	Tracking	トラッキング
 	Transform Both	両方を変形
 	Transform Each	個別に変形

@@ -94,6 +94,12 @@ impl DockTab {
     }
 }
 
+/// Every panel `window.panel` shows, as (id, English label): the dock tabs, then the icon panels.
+pub fn all_panels() -> impl Iterator<Item = (&'static str, &'static str)> {
+    let tabs = DockTab::ALL.into_iter().map(|t| (t.info().0, t.info().1));
+    tabs.chain(ICON_PANELS.iter().map(|&(id, label, _)| (id, label)))
+}
+
 /// Panels that live as collapsed icons in the dock (Essentials Classic).
 pub const ICON_PANELS: &[(&str, &str, &str)] = &[
     ("color", "Color", "palette"),
@@ -252,6 +258,10 @@ pub struct UiState {
     pub toolbar_advanced: bool,
     #[serde(default = "yes")]
     pub task_bar: bool,
+    /// Where the Contextual Task Bar was dragged or pinned. Not saved, as in Illustrator: the bar
+    /// starts under the selection at every launch.
+    #[serde(skip)]
+    pub task_bar_place: TaskBarPlace,
     /// Last tool shown in each toolbar slot (keyed by the slot's first tool id).
     #[serde(default)]
     pub slot_tool: std::collections::BTreeMap<String, String>,
@@ -272,7 +282,10 @@ pub struct UiState {
     pub status: String,
     pub palette_open: bool,
     pub palette_query: String,
-    /// Screen mode: 0 normal, 1 full screen with menu, 2 full screen, 3 presentation.
+    /// Screen mode: 0 normal, 1 full screen with menu, 2 full screen, 3 presentation. Not saved:
+    /// the app always starts in Normal Screen Mode, with its menus and panels (#472: a saved
+    /// Presentation Mode came back on restart with no way out).
+    #[serde(skip)]
     pub screen_mode: u8,
     /// Draw Normal / Behind / Inside.
     pub draw_mode: u8,
@@ -380,6 +393,24 @@ pub struct FloatingFlyout {
     pub pos: [f32; 2],
 }
 
+/// Where the Contextual Task Bar sits once its handle has moved it (`window.taskBar.pin`,
+/// `window.taskBar.reset`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TaskBarPlace {
+    /// More Options › Pin Bar Position: the bar stays where it is instead of following the selection.
+    pub pinned: bool,
+    /// Where a pinned bar's top-left corner sits from the canvas's top-left (none when it was
+    /// pinned before it ever showed, until it is drawn). Unpinning leaves it for the next frame
+    /// to turn into `offset`.
+    pub pin_at: Option<egui::Vec2>,
+    /// Where the bar was last drawn, from the canvas's top-left: where pinning holds it.
+    pub shown_at: Option<egui::Vec2>,
+    /// How far an unpinned bar was dragged from its place under the selection, which it keeps while
+    /// it follows the selection, and the document (`DocState::uid`) it was moved in: in another
+    /// document the bar starts under the selection again.
+    pub offset: Option<(u64, egui::Vec2)>,
+}
+
 impl UiState {
     /// Clear transient state after loading saved preferences.
     pub fn sanitized(mut self) -> Self {
@@ -398,6 +429,9 @@ impl UiState {
             f.tools.retain(|id| vectorcraft_tools::tool_info(id).is_some());
             f.tools.first().is_some_and(|k| seen.insert(k.clone()))
         });
+        // Overrides that can't fire (modifier-only chords recorded by older versions, #487) give
+        // the default back.
+        self.shortcut_overrides.retain(|_, c| c.is_empty() || crate::shortcut_editor::normalize(c).is_some());
         self
     }
 }
@@ -415,6 +449,7 @@ impl Default for UiState {
             toolbar_double: false,
             toolbar_advanced: false,
             task_bar: true,
+            task_bar_place: TaskBarPlace::default(),
             slot_tool: Default::default(),
             floating_flyouts: vec![],
             status_bar: true,

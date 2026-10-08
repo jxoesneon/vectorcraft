@@ -135,6 +135,7 @@
 	Anchor Points	錨點
 	Anchor Points, Handle, and Bounding Box Display	錨點、控制把手與邊框顯示
 	Anchor/Path Labels	錨點/路徑標籤
+	Anchors:	錨點：
 	Angle	角度
 	Angle:	角度：
 	Angles	角度
@@ -259,6 +260,8 @@
 	Bottom	下
 	Bottom in Front	下方置前
 	Bottom-to-Bottom Leading	基線至基線行距
+	Burasagari	標點懸掛
+	Force	強制
 	Bottom:	下：
 	Bounds	邊界
 	Bounds (Fill Proportionally)	邊界 (按比例填滿)
@@ -440,12 +443,15 @@
 	Compression:	壓縮：
 	Condition identifier:	條件識別碼：
 	Conflict {n} of {count}	衝突 {n}／{count}
+	Connect Selected End Points	連接所選端點
 	Consolidate All Windows	合併所有視窗
 	Constrain Angle	強制角度
 	Constrain Width and Height Proportions	強制寬度與高度比例
 	Construction Guides	建構參考線
 	Contextual Alternates	前後關聯替代字
 	Contextual Task Bar	快捷工作列
+	Pin Bar Position	釘選工作列位置
+	Reset Bar Position	重設工作列位置
 	Contrast	對比
 	Control	控制
 	Convert	轉換
@@ -457,6 +463,8 @@
 	Convert Color	轉換顏色
 	Convert Document Color Mode	轉換文件色彩模式
 	Convert Process to Global	將印刷色轉換為整體色
+	Convert Selected Anchor Points to Corner	將所選錨點轉換為尖角
+	Convert Selected Anchor Points to Smooth	將所選錨點轉換為平滑
 	Convert text to outlines	將文字轉換為外框
 	Convert To Area Type	轉換為區域文字
 	Convert to Artboards	轉換為工作區域
@@ -467,6 +475,7 @@
 	Convert to RGB	轉換為 RGB
 	Convert to Shape	轉換為形狀
 	Convert to sRGB	轉換為 sRGB
+	Convert:	轉換：
 	Copied the CSS of {rules} object(s)	已複製 {rules} 個物件的 CSS
 	Copies:	份數：
 	Copy	複製
@@ -487,6 +496,7 @@
 	Corner Radius:	圓角半徑：
 	Corner:	轉角：
 	Corners	轉角
+	Cut Path	切斷路徑
 	Descender	下緣
 	Flip	翻轉
 	Round	圓角
@@ -524,6 +534,7 @@
 	Created:	建立時間：
 	Crop	裁切
 	Crop Image	裁切影像
+	Mask	遮色片
 	Crop Marks	裁切標記
 	Crop To	裁切至
 	Crystallize Tool	結晶化工具
@@ -708,6 +719,8 @@
 	Duplicate	製作複本
 	Duplicate and Offset 10 pt	製作複本並位移 10 pt
 	Duplicate Artboard	製作工作區域複本
+	Copy Artboard	複製工作區域
+	Cut Artboard	剪下工作區域
 	Duplicate Artboards	製作工作區域複本
 	Duplicate Brush	製作筆刷複本
 	Duplicate Character Style	製作字元樣式複本
@@ -1095,7 +1108,9 @@
 	Hide Artboards	隱藏工作區域
 	Hide Bounding Box	隱藏邊框
 	Hide Code	隱藏程式碼
-	Hide Contextual Task Bar	隱藏快捷工作列
+	Hide Bar	隱藏工作列
+	More Options	更多選項
+	Show Properties Panel	顯示內容面板
 	Hide Corner Widget	隱藏轉角 Widget
 	Hide Corner Widget for angles greater than	角度大於以下數值時隱藏轉角 Widget
 	Hide Edges	隱藏邊緣
@@ -1156,6 +1171,8 @@
 	Image Map:	影像地圖：
 	Image Size	影像尺寸
 	Image Trace	影像描圖
+	Image Tracing	影像描圖物件
+	Tracing Presets	描圖預設集
 	Image Trace Presets	影像描圖預設集
 	Image:	影像：
 	Images:	影像：
@@ -2446,7 +2463,7 @@
 	Simplify…	簡化…
 	Simulate Colored Paper	模擬有色紙張
 	Simulate Paper	模擬紙張
-	Single / Double Column	單欄 / 雙欄
+	Double Column	雙欄
 	Single Left Quotation Mark	左單引號
 	Single Quotes:	單引號：
 	Single Right Quotation Mark	右單引號
@@ -2546,6 +2563,8 @@
 	Stroke (X), double-click for the Color Picker	筆畫 (X)，按兩下開啟檢色器
 	Stroke Color	筆畫顏色
 	Stroke Options	筆畫選項
+	Character:	字元：
+	Character options	字元選項
 	Stroke options	筆畫選項
 	Stroke Weight	筆畫寬度
 	Stroke:	筆畫：
@@ -2684,6 +2703,7 @@
 	Total Width:	總寬度：
 	Touch Type Tool	觸控文字工具
 	Trace	描圖
+	Trace the image with the Default preset	使用「預設」預設集描圖影像
 	Tracing	描圖中
 	Tracking	字距
 	Trademark Symbol	商標符號

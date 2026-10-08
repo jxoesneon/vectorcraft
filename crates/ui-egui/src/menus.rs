@@ -11,7 +11,7 @@ use vectorcraft_engine::cmd::fileio::SaveMode;
 
 use crate::VectorcraftApp;
 use crate::io;
-use crate::state::{DockTab, ICON_PANELS, next_zoom};
+use crate::state::{DockTab, next_zoom};
 use crate::theme::{self, Brightness, Tokens};
 use crate::widgets;
 
@@ -56,7 +56,12 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "",
         "{lang: auto|<code>} the interface language, persisted as the `interfaceLanguage` preference (`auto` follows the system locale; codes: prefs.list › interfaceLanguage, e.g. en, ja, cs, es, zh-hant)",
     ),
-    ("file.open", "Open…", "Cmd+O", "{path?}"),
+    (
+        "file.open",
+        "Open…",
+        "Cmd+O",
+        "{path?} → with a path, document.open's result {index, title, format, warnings, …} (null when a dialog asks first or a library loads)",
+    ),
     (
         "file.save",
         "Save",
@@ -197,7 +202,12 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
     ("view.rotateReset", "Reset Rotate View", "Cmd+Shift+1", "{}"),
     ("window.control", "Control", "", "{}"),
     ("window.toolbar", "Tools", "", "{}"),
-    ("window.toolbarColumns", "Toolbar: Single/Double Column", "", "{}"),
+    (
+        "window.toolbarColumns",
+        "Toolbar: Single/Double Column",
+        "",
+        "{double?: bool} show the toolbar's tools in two columns (true), one (false) or toggle (omitted), as the double arrow at the top of the toolbar does; returns the new state",
+    ),
     ("window.toolbarAdvanced", "Toolbar: Advanced / Basic", "", "{}"),
     (
         "window.floatTools",
@@ -206,6 +216,13 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
         "{tool: id, floating?: bool} float the toolbar group holding `tool` (in the current Basic or Advanced layout) as its own strip of tool buttons (true), put it back in the toolbar (false) or toggle (omitted), as dragging or clicking a flyout's tear-off bar and the strip's × do; returns the new state",
     ),
     ("window.taskBar", "Contextual Task Bar", "", "{}"),
+    (
+        "window.taskBar.pin",
+        "Pin Bar Position",
+        "",
+        "{pinned?: bool} keep the Contextual Task Bar where it is instead of following the selection (true), let it follow the selection again from where it is (false) or toggle (omitted), as the bar's More Options menu does; returns the new state",
+    ),
+    ("window.taskBar.reset", "Reset Bar Position", "", "{} unpin the Contextual Task Bar and put it back under the selection"),
     ("window.dock", "Panels", "Tab", "{} show/hide all panels"),
     ("window.panel", "Show Panel", "", "{panel: id} e.g. layers, swatches, stroke (case-insensitive; display labels like \"Layers\" work too)"),
     (
@@ -757,10 +774,16 @@ pub const UI_COMMANDS: &[(&str, &str, &str, &str)] = &[
 /// matched case-insensitively (`"Layers"`, `"swatches"`, `"Color Guide"`).
 fn normalize_panel(input: &str) -> Option<&'static str> {
     let name = input.trim();
-    let tabs = DockTab::ALL.into_iter().map(|t| (t.info().0, t.info().1));
-    tabs.chain(ICON_PANELS.iter().map(|&(id, label, _)| (id, label)))
-        .find(|(id, label)| name.eq_ignore_ascii_case(id) || name.eq_ignore_ascii_case(label))
-        .map(|(id, _)| id)
+    crate::state::all_panels().find(|(id, label)| name.eq_ignore_ascii_case(id) || name.eq_ignore_ascii_case(label)).map(|(id, _)| id)
+}
+
+/// An optional `{key?: bool}` param: none when it is omitted or null (the commands then toggle).
+fn opt_bool(p: &Value, key: &str) -> Result<Option<bool>, String> {
+    match p.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(b)) => Ok(Some(*b)),
+        Some(_) => Err(format!("`{key}` must be true or false")),
+    }
 }
 
 /// Handle a UI command. `None` = not a UI command (the engine handles it).
@@ -798,7 +821,7 @@ pub fn run_ui_command(app: &mut VectorcraftApp, id: &str, p: &Value) -> Option<R
             Ok(Value::Null)
         }
         "file.open" => match s("path") {
-            Some(path) => io::open_path(app, &path).map(|_| Value::Null),
+            Some(path) => io::open_path(app, &path),
             None => io::open_dialog(app).map(|_| Value::Null),
         },
         // Saves write through the app (save panel, download); with no path known the panel and the
@@ -815,7 +838,7 @@ pub fn run_ui_command(app: &mut VectorcraftApp, id: &str, p: &Value) -> Option<R
         "file.revert" if p.get("confirmed").and_then(Value::as_bool) != Some(true) => io::ask_revert(app),
         "file.reveal" => io::reveal(app),
         id if id.starts_with("file.openRecent") => match recent_slot(app, id).cloned() {
-            Some(path) => io::open_path(app, &path).map(|_| Value::Null),
+            Some(path) => io::open_path(app, &path),
             None => Err("no such recent file".into()),
         },
         "type.findFont" => {
@@ -972,7 +995,10 @@ pub fn run_ui_command(app: &mut VectorcraftApp, id: &str, p: &Value) -> Option<R
         "view.screenMode" => {
             app.ui.screen_mode = match p.get("mode").and_then(Value::as_u64) {
                 Some(m) => m.min(3) as u8,
-                None => (app.ui.screen_mode + 1) % 3,
+                // F cycles the three screen modes; from Presentation Mode (not in the cycle) it
+                // goes back to Normal.
+                None if app.ui.screen_mode >= 2 => 0,
+                None => app.ui.screen_mode + 1,
             };
             Ok(json!(app.ui.screen_mode))
         }
@@ -984,18 +1010,38 @@ pub fn run_ui_command(app: &mut VectorcraftApp, id: &str, p: &Value) -> Option<R
         }
         "window.control" => flag(&mut app.ui.control_bar),
         "window.toolbar" => flag(&mut app.ui.toolbar),
-        "window.toolbarColumns" => flag(&mut app.ui.toolbar_double),
+        "window.toolbarColumns" => opt_bool(p, "double").map(|on| {
+            let on = on.unwrap_or(!app.ui.toolbar_double);
+            app.ui.toolbar_double = on;
+            json!(on)
+        }),
         "window.toolbarAdvanced" => flag(&mut app.ui.toolbar_advanced),
         "window.floatTools" => {
-            let floating = match p.get("floating") {
-                None | Some(Value::Null) => None,
-                Some(Value::Bool(b)) => Some(*b),
-                Some(_) => return Some(Err("floating must be true or false".into())),
+            let floating = match opt_bool(p, "floating") {
+                Ok(on) => on,
+                Err(e) => return Some(Err(e)),
             };
             let Some(tool) = s("tool") else { return Some(Err("tool (a tool id) is required".into())) };
             crate::toolbar::float_group(app, &tool, floating).map(Value::Bool)
         }
         "window.taskBar" => flag(&mut app.ui.task_bar),
+        "window.taskBar.pin" => {
+            let place = &mut app.ui.task_bar_place;
+            opt_bool(p, "pinned").map(|pinned| {
+                let pinned = pinned.unwrap_or(!place.pinned);
+                // Pinning holds the bar where it shows; unpinning lets it follow the selection from
+                // there (the bar turns its pinned spot into an offset when it is next drawn).
+                if pinned && !place.pinned {
+                    place.pin_at = place.shown_at;
+                }
+                place.pinned = pinned;
+                json!(pinned)
+            })
+        }
+        "window.taskBar.reset" => {
+            app.ui.task_bar_place = Default::default();
+            Ok(Value::Null)
+        }
         "window.dock" => {
             let on = !(app.ui.dock && app.ui.toolbar);
             app.ui.dock = on;
@@ -1003,15 +1049,11 @@ pub fn run_ui_command(app: &mut VectorcraftApp, id: &str, p: &Value) -> Option<R
             app.ui.control_bar = on;
             Ok(json!(on))
         }
-        "window.collapseDock" => {
-            let collapsed = match p.get("collapsed") {
-                None | Some(Value::Null) => !app.ui.dock_collapsed,
-                Some(Value::Bool(b)) => *b,
-                Some(_) => return Some(Err("collapsed must be true or false".into())),
-            };
+        "window.collapseDock" => opt_bool(p, "collapsed").map(|collapsed| {
+            let collapsed = collapsed.unwrap_or(!app.ui.dock_collapsed);
             crate::dock::set_collapsed(app, collapsed);
-            Ok(json!(collapsed))
-        }
+            json!(collapsed)
+        }),
         "window.panel" => {
             let raw = s("panel").unwrap_or_default();
             // Canonical id (case-insensitive; display labels work too), then the
@@ -1317,11 +1359,13 @@ pub fn checked(app: &VectorcraftApp, id: &str, p: &Value) -> Option<bool> {
         "window.control" => app.ui.control_bar,
         "window.toolbar" => app.ui.toolbar,
         "window.toolbarAdvanced" => app.ui.toolbar_advanced,
+        "window.toolbarColumns" => app.ui.toolbar_double,
         "window.floatTools" => {
             let tool = p.get("tool").and_then(Value::as_str).unwrap_or("");
             app.ui.floating_flyouts.iter().any(|f| f.tools.iter().any(|id| id == tool))
         }
         "window.taskBar" => app.ui.task_bar,
+        "window.taskBar.pin" => app.ui.task_bar_place.pinned,
         "window.panel" => {
             let panel = p.get("panel").and_then(Value::as_str).unwrap_or("");
             let canonical = normalize_panel(panel);
@@ -2305,7 +2349,7 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<Item>)> {
                 c("Control", "window.control"),
                 c("Contextual Task Bar", "window.taskBar"),
                 c("Tools", "window.toolbar"),
-                sub("Toolbars", vec![c("Advanced", "window.toolbarAdvanced"), c("Single / Double Column", "window.toolbarColumns")]),
+                sub("Toolbars", vec![c("Advanced", "window.toolbarAdvanced"), c("Double Column", "window.toolbarColumns")]),
                 Sep,
                 panel("Actions", "actions"),
                 panel("Align", "align"),
@@ -2451,7 +2495,7 @@ pub fn context_items(app: &VectorcraftApp) -> Vec<Item> {
             v.extend([c("Join", "path.join"), c("Average…", "path.average")]);
         }
         if !st.selection.anchors.is_empty() {
-            v.push(c("Remove Anchor Points", "path.removeAnchors"));
+            v.extend([c("Remove Anchor Points", "path.removeAnchors"), c("Cut Path at Selected Anchor Points", "path.cutAtAnchors")]);
         }
         if several {
             v.push(c("Make Clipping Mask", "object.clippingMask.make"));
@@ -2652,6 +2696,13 @@ fn render_items(app: &VectorcraftApp, ui: &mut egui::Ui, items: &[Item], checks:
 /// document count. When either changes, the Home screen gives way to the document.
 pub(crate) fn home_key(app: &VectorcraftApp) -> (Option<u64>, usize) {
     (app.session.active().map(|d| d.uid), app.session.documents().len())
+}
+
+/// Whether the Home screen is up: chosen with the Home button (`app.home`), or no document is open
+/// and Preferences › General › Show The Home Screen When No Documents Are Open is on (#394). Off,
+/// an app with no document shows an empty window, and the Home button still opens the screen.
+pub(crate) fn home_showing(app: &VectorcraftApp) -> bool {
+    app.ui.home.is_some() || (app.session.active().is_none() && app.session.prefs.show_home_screen)
 }
 
 fn label_of(it: &Item) -> &'static str {
@@ -3216,8 +3267,7 @@ pub fn menu_strings() -> std::collections::BTreeSet<String> {
         out.insert(c.label.to_string());
         out.extend(c.menu.iter().map(|m| m.to_string()));
     }
-    out.extend(ICON_PANELS.iter().map(|p| p.1.to_string()));
-    out.extend(["Properties", "Layers", "Libraries"].map(str::to_string));
+    out.extend(crate::state::all_panels().map(|(_, label)| label.to_string()));
     out.extend(vectorcraft_tools::catalog::all_tools().map(|t| t.label.to_string()));
     out.extend(crate::toolbar::BASIC.iter().map(|c| c.0.to_string()));
     out.extend(vectorcraft_color::BlendMode::ALL.iter().map(|m| m.label().to_string()));

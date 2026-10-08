@@ -447,6 +447,8 @@
 	Construction Guides	Guias de Construção
 	Contextual Alternates	Variantes Contextuais
 	Contextual Task Bar	Barra de Tarefas Contextual
+	Pin Bar Position	Fixar Posição da Barra
+	Reset Bar Position	Redefinir Posição da Barra
 	Control	Controle
 	Convert	Converter
 	Convert All Spot Colors to Process	Converter Todas as Cores Spot em Processo
@@ -508,6 +510,7 @@
 	Created:	Criado:
 	Crop	Recortar
 	Crop Image	Recortar Imagem
+	Mask	Máscara
 	Crop Marks	Marcas de Corte
 	Crop To	Recortar Para
 	Crystallize Tool	Ferramenta Cristalizar
@@ -666,6 +669,8 @@
 	Duotone Gradients	Gradientes Duotônicos
 	Duplicate	Duplicar
 	Duplicate Artboard	Duplicar Mesa de Trabalho
+	Copy Artboard	Copiar Mesa de Trabalho
+	Cut Artboard	Recortar Mesa de Trabalho
 	Duplicate Artboards	Duplicar Mesas de Trabalho
 	Duplicate Brush	Duplicar Pincel
 	Duplicate Character Style	Duplicar Estilo de Caractere
@@ -1003,7 +1008,9 @@
 	Hide Artboards	Ocultar Mesas de Trabalho
 	Hide Bounding Box	Ocultar Caixa Delimitadora
 	Hide Code	Ocultar Código
-	Hide Contextual Task Bar	Ocultar Barra de Tarefas Contextual
+	Hide Bar	Ocultar Barra
+	More Options	Mais Opções
+	Show Properties Panel	Mostrar Painel Propriedades
 	Hide Corner Widget	Ocultar Widget de Canto
 	Hide Corner Widget for angles greater than	Ocultar Widget de Canto para ângulos maiores que
 	Hide Edges	Ocultar Bordas
@@ -2151,7 +2158,7 @@
 	Simplify…	Simplificar…
 	Simulate Colored Paper	Simular Papel Colorido
 	Simulate Paper	Simular Papel
-	Single / Double Column	Coluna Única / Dupla
+	Double Column	Coluna Dupla
 	Single Left Quotation Mark	Aspa Esquerda Única
 	Single Quotes:	Aspas Simples:
 	Single Right Quotation Mark	Aspa Direita Única
@@ -2238,6 +2245,8 @@
 	Stroke Color	Cor do Traçado
 	Stroke Options	Opções de Traçado
 	Stroke Weight	Peso do Traçado
+	Character:	Caractere:
+	Character options	Opções de caractere
 	Stroke options	Opções de traçado
 	Stroke:	Traçado:
 	Style	Estilo

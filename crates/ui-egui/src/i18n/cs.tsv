@@ -11,6 +11,7 @@
 # names.
 	About VectorCraft	O aplikaci VectorCraft
 	Align to Path	Zarovnat k cestě
+	Cut Path at Selected Anchor Points	Rozdělit cestu ve vybraných kotevních bodech
 	Join Our Discord	Připojit se k našemu Discordu
 	Settings…	Nastavení…
 	Language	Jazyk
@@ -132,6 +133,7 @@
 	Expand…	Rozložit…
 	Expand Appearance	Rozložit vzhled
 	Crop Image	Oříznout obraz
+	Mask	Maska
 	Rasterize…	Rastrovat…
 	Create Gradient Mesh…	Vytvořit přechodovou síť…
 	Create Object Mosaic…	Vytvořit mozaiku objektů…
@@ -488,10 +490,12 @@
 	Manage Workspaces…	Spravovat pracovní prostory…
 	Control	Ovládací panel
 	Contextual Task Bar	Kontextový panel úloh
+	Pin Bar Position	Připnout polohu panelu
+	Reset Bar Position	Obnovit polohu panelu
 	Tools	Nástroje
 	Toolbars	Panely nástrojů
 	Advanced	Rozšířený
-	Single / Double Column	Jeden / dva sloupce
+	Double Column	Dva sloupce
 	Actions	Akce
 	Asset Export	Export prvků
 	Attributes	Atributy

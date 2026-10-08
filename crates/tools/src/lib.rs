@@ -31,6 +31,7 @@ pub mod shape;
 pub mod slice;
 pub mod symbolism;
 pub mod text;
+pub mod typewidget;
 pub mod xform;
 
 use serde::{Deserialize, Serialize};
@@ -272,6 +273,9 @@ pub struct ToolContext<'a> {
     /// Selection & Anchor Display → Object Selection by Path Only: a click inside a filled path
     /// doesn't pick it, only one on its path does.
     pub path_only: bool,
+    /// Type → Type Object Selection by Path Only: type is picked on its type path only (point
+    /// type's baseline, area type's frame, type on a path's path), not anywhere in its bounds.
+    pub type_path_only: bool,
     /// General → Double Click To Isolate: a double-click on a group with the Selection tool
     /// isolates it.
     pub double_click_isolate: bool,
@@ -301,6 +305,20 @@ pub struct ToolContext<'a> {
     /// Type → Fill New Type Objects With Placeholder Text: type the Type tools place starts with
     /// placeholder text, selected.
     pub placeholder_text: bool,
+    /// Smart Guides → Color: the smart guides' lines and labels (RGB).
+    pub smart_guide_color: [u8; 3],
+    /// Smart Guides → Alignment Guides: the lines along the edges and centres the art lines up
+    /// with show. Off, the art still snaps into line.
+    pub alignment_guides: bool,
+    /// Smart Guides → Anchor/Path Labels: the "anchor", "center", "path"… labels show.
+    pub anchor_path_labels: bool,
+    /// Smart Guides → Measurement Labels: the size and offset readouts while drawing and moving.
+    pub measurement_labels: bool,
+    /// Smart Guides → Transform Tools: the readouts while scaling, rotating and shearing.
+    pub transform_tools_guides: bool,
+    /// Smart Guides → Snapping Tolerance (screen pixels): how near a smart guide target pulls the
+    /// pointer, a dragged edge or a drawn point.
+    pub snapping_tolerance: f64,
     /// The document window (none headless): screen-fixed widgets sit in it.
     pub screen: Option<ScreenFrame>,
     /// Where the Plane Switching Widget sits (Perspective Grid Options); None while it's hidden.
@@ -311,6 +329,10 @@ impl ToolContext<'_> {
     /// Tolerance in document units for `px` screen pixels.
     pub fn tol(&self, px: f64) -> f64 {
         px / self.zoom.max(1e-9)
+    }
+    /// How near (document units) a smart guide target pulls: Smart Guides → Snapping Tolerance.
+    pub fn snap_tol(&self) -> f64 {
+        self.tol(self.snapping_tolerance)
     }
     /// A length as measurement labels show it, in the General unit (`12.50 mm`).
     pub fn len(&self, v: f64) -> String {
@@ -333,7 +355,12 @@ impl ToolContext<'_> {
         self.tol(self.selection_tolerance)
     }
     pub fn hit_options(&self) -> vectorcraft_doc::hit::HitOptions {
-        vectorcraft_doc::hit::HitOptions { tol: self.pick_tol(), outline: self.outline, path_only: self.path_only }
+        vectorcraft_doc::hit::HitOptions {
+            tol: self.pick_tol(),
+            outline: self.outline,
+            path_only: self.path_only,
+            type_path_only: self.type_path_only,
+        }
     }
 }
 
@@ -381,7 +408,8 @@ pub enum Cursor {
     PenDelete,
     PenClose,
     PenContinue,
-    /// Over the last anchor of the path being drawn: a click retracts its outgoing handle.
+    /// Over the last anchor of the path being drawn (a click retracts its outgoing handle), or with
+    /// Alt held over a selected path's handle or anchor (the Anchor Point tool's gesture).
     PenConvert,
     Text,
     Hand,
@@ -412,6 +440,9 @@ pub enum Cursor {
     BlendAnchor,
     /// Over a bracket of selected type on a path (a drag moves it): the arrow with a bracket.
     PathBracket,
+    /// Over the type widget of selected type (a double-click converts point type to area type and
+    /// back): the arrow with a type badge.
+    TypeWidget,
     /// The Shape Builder: a crosshair with a plus (merge mode)...
     ShapeBuilder,
     /// ...or, with Alt held, a minus (erase mode).
@@ -627,6 +658,7 @@ pub(crate) mod testutil {
             auto_add_delete: true,
             selection_tolerance: 3.0,
             path_only: false,
+            type_path_only: false,
             double_click_isolate: true,
             select_behind: true,
             highlight_anchors: true,
@@ -637,6 +669,12 @@ pub(crate) mod testutil {
             pen_rubber_band: true,
             curvature_rubber_band: true,
             placeholder_text: false,
+            smart_guide_color: guides::MAGENTA,
+            alignment_guides: true,
+            anchor_path_labels: true,
+            measurement_labels: true,
+            transform_tools_guides: true,
+            snapping_tolerance: 4.0,
             screen: None,
             plane_widget: Some(Default::default()),
         }
