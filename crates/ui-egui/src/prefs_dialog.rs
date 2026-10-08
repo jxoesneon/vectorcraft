@@ -77,6 +77,8 @@ struct Applied {
     brightness: Brightness,
     white_canvas: bool,
     threads: i32,
+    tool_tips: bool,
+    scrub: bool,
 }
 
 /// Per frame: push UI-side preferences into egui / the renderer when they change.
@@ -87,11 +89,22 @@ pub fn apply_runtime(app: &mut VectorcraftApp, ctx: &egui::Context) {
     {
         app.ui.brightness = b;
     }
-    let want = Applied { brightness: app.ui.brightness, white_canvas: p.canvas_color == "white", threads: p.render_threads };
+    let want = Applied {
+        brightness: app.ui.brightness,
+        white_canvas: p.canvas_color == "white",
+        threads: p.render_threads,
+        tool_tips: p.show_tool_tips,
+        scrub: p.scrub_numeric_fields,
+    };
     let id = egui::Id::new("dc-applied-prefs");
     let prev: Option<Applied> = ctx.data(|d| d.get_temp::<Option<Applied>>(id)).flatten();
     if prev != Some(want) {
         theme::apply(ctx, want.brightness);
+        // General › Show Tool Tips: off, no button or field shows its tool tip (they never come
+        // due), whichever widget asks for one.
+        let delay = if want.tool_tips { egui::style::Interaction::default().tooltip_delay } else { f32::INFINITY };
+        ctx.global_style_mut(|s| s.interaction.tooltip_delay = delay);
+        crate::scrub::set_enabled(ctx, want.scrub);
         if want.white_canvas {
             let mut t = Tokens::get(ctx);
             t.pasteboard = egui::Color32::WHITE;
@@ -116,81 +129,67 @@ pub fn show(app: &mut VectorcraftApp, ctx: &egui::Context) {
     let Some(mut d) = app.ui.dialog.clone() else { return };
     let t = Tokens::get(ctx);
     let (mut ok, mut cancel, mut reset) = (false, false, false);
-    egui::Area::new(egui::Id::new("modal-dim")).order(egui::Order::Middle).fixed_pos(egui::pos2(0.0, 0.0)).show(ctx, |ui| {
-        ui.allocate_rect(ctx.content_rect(), egui::Sense::click());
-    });
     let cat = d.str("__category");
     let cat = PREF_CATEGORIES.iter().find(|c| **c == cat).copied().unwrap_or(PREF_CATEGORIES[0]);
-    egui::Window::new(tl!("Preferences"))
-        .id(egui::Id::new("dialog-preferences"))
-        .order(egui::Order::Foreground)
-        .collapsible(false)
-        .resizable(false)
-        .title_bar(false)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, -20.0])
-        .frame(egui::Frame::window(&ctx.global_style()).fill(t.panel).inner_margin(egui::Margin::same(20)))
-        .show(ctx, |ui| {
-            ui.set_width(760.0);
-            ui.label(egui::RichText::new(tl!("Preferences")).font(theme::semibold(16.0)).color(t.text));
-            ui.add_space(12.0);
-            ui.horizontal_top(|ui| {
-                // Category list.
-                egui::Frame::NONE.fill(t.panel_darker).corner_radius(egui::CornerRadius::same(4)).inner_margin(egui::Margin::same(6)).show(
-                    ui,
-                    |ui| {
-                        ui.set_width(196.0);
-                        ui.set_min_height(430.0);
-                        ui.vertical(|ui| {
-                            ui.spacing_mut().item_spacing.y = 1.0;
-                            for c in PREF_CATEGORIES {
-                                let sel = *c == cat;
-                                let text = egui::RichText::new(tl!(*c)).size(12.5).color(if sel { t.text_strong } else { t.text });
-                                let b = egui::Button::selectable(sel, text).frame_when_inactive(false).min_size(egui::vec2(184.0, 24.0));
-                                if ui.add(b).clicked() {
-                                    d.fields.insert("__category".into(), json!(c));
-                                }
-                            }
-                        });
-                    },
-                );
-                ui.add_space(14.0);
-                // Fields.
+    crate::dialogs::modal::show(ctx, tl!("Preferences"), egui::Id::new("dialog-preferences"), -20.0, 20, |ui| {
+        ui.set_width(760.0);
+        crate::dialogs::modal::heading(ui, tl!("Preferences"));
+        ui.add_space(12.0);
+        ui.horizontal_top(|ui| {
+            // Category list.
+            egui::Frame::NONE.fill(t.panel_darker).corner_radius(egui::CornerRadius::same(4)).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
+                ui.set_width(196.0);
+                ui.set_min_height(430.0);
                 ui.vertical(|ui| {
-                    ui.set_width(530.0);
-                    ui.label(egui::RichText::new(tl!(cat)).font(theme::semibold(14.0)).color(t.text_strong));
-                    ui.add_space(8.0);
-                    egui::ScrollArea::vertical().id_salt(("prefs", cat)).max_height(400.0).auto_shrink([false, false]).show(ui, |ui| {
-                        category_fields(ui, &mut d, cat);
-                    });
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    for c in PREF_CATEGORIES {
+                        let sel = *c == cat;
+                        let text = egui::RichText::new(tl!(*c)).size(12.5).color(if sel { t.text_strong } else { t.text });
+                        let b = egui::Button::selectable(sel, text).frame_when_inactive(false).min_size(egui::vec2(184.0, 24.0));
+                        if ui.add(b).clicked() {
+                            d.fields.insert("__category".into(), json!(c));
+                        }
+                    }
                 });
             });
             ui.add_space(14.0);
-            ui.horizontal(|ui| {
-                if widgets::secondary_button(ui, tl!("Reset Preferences"))
-                    .on_hover_text(tl!("Restore every preference to its default (applied on OK)"))
-                    .clicked()
-                {
-                    reset = true;
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if widgets::primary_button(ui, tl!("OK")).clicked() {
-                        ok = true;
-                    }
-                    ui.add_space(8.0);
-                    if widgets::secondary_button(ui, tl!("Cancel")).clicked() {
-                        cancel = true;
-                    }
-                    ui.add_space(16.0);
-                    let i = PREF_CATEGORIES.iter().position(|c| *c == cat).unwrap_or(0);
-                    if ui.add_enabled(i + 1 < PREF_CATEGORIES.len(), egui::Button::new(tl!("Next"))).clicked() {
-                        d.fields.insert("__category".into(), json!(PREF_CATEGORIES[i + 1]));
-                    }
-                    if ui.add_enabled(i > 0, egui::Button::new(tl!("Previous"))).clicked() {
-                        d.fields.insert("__category".into(), json!(PREF_CATEGORIES[i - 1]));
-                    }
+            // Fields.
+            ui.vertical(|ui| {
+                ui.set_width(530.0);
+                ui.label(egui::RichText::new(tl!(cat)).font(theme::semibold(14.0)).color(t.text_strong));
+                ui.add_space(8.0);
+                egui::ScrollArea::vertical().id_salt(("prefs", cat)).max_height(400.0).auto_shrink([false, false]).show(ui, |ui| {
+                    category_fields(ui, &mut d, cat);
                 });
             });
         });
+        ui.add_space(14.0);
+        ui.horizontal(|ui| {
+            if widgets::secondary_button(ui, tl!("Reset Preferences"))
+                .on_hover_text(tl!("Restore every preference to its default (applied on OK)"))
+                .clicked()
+            {
+                reset = true;
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if widgets::primary_button(ui, tl!("OK")).clicked() {
+                    ok = true;
+                }
+                ui.add_space(8.0);
+                if widgets::secondary_button(ui, tl!("Cancel")).clicked() {
+                    cancel = true;
+                }
+                ui.add_space(16.0);
+                let i = PREF_CATEGORIES.iter().position(|c| *c == cat).unwrap_or(0);
+                if ui.add_enabled(i + 1 < PREF_CATEGORIES.len(), egui::Button::new(tl!("Next"))).clicked() {
+                    d.fields.insert("__category".into(), json!(PREF_CATEGORIES[i + 1]));
+                }
+                if ui.add_enabled(i > 0, egui::Button::new(tl!("Previous"))).clicked() {
+                    d.fields.insert("__category".into(), json!(PREF_CATEGORIES[i - 1]));
+                }
+            });
+        });
+    });
     if reset {
         for (k, v) in Prefs::default().to_json().as_object().cloned().unwrap_or_default() {
             d.fields.insert(k, v);
@@ -364,6 +363,52 @@ mod tests {
         assert_eq!(a.session.prefs.ui_brightness, "light");
         assert!(!a.ui.view.smart_guides);
         assert_eq!(a.ui.engine_prefs["keyboardIncrement"], json!(4.0));
+    }
+
+    /// General › Show Tool Tips: off, a button held under the pointer shows no tool tip; back on,
+    /// it does again (#394).
+    #[test]
+    fn show_tool_tips_off_hides_tool_tips() {
+        fn texts(s: &egui::Shape, out: &mut Vec<String>) {
+            match s {
+                egui::Shape::Text(t) => out.push(t.galley.text().to_string()),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| texts(s, out)),
+                _ => {}
+            }
+        }
+        let mut a = app();
+        let ctx = egui::Context::default();
+        let mut time = 0.0;
+        // Come from elsewhere and hover the button for two seconds: did its tool tip show?
+        let mut hover = |a: &mut VectorcraftApp| {
+            let mut shown = vec![];
+            for i in 0..20 {
+                time += 0.1;
+                let events = match i {
+                    0 => vec![egui::Event::PointerGone],
+                    1 => vec![egui::Event::PointerMoved(egui::pos2(20.0, 12.0))],
+                    _ => vec![],
+                };
+                let raw = egui::RawInput {
+                    events,
+                    time: Some(time),
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0))),
+                    ..Default::default()
+                };
+                let mut out = ctx.run_ui(raw, |ui| {
+                    apply_runtime(a, ui.ctx());
+                    ui.button("Button").on_hover_text("The tool tip");
+                });
+                out.textures_delta.clear();
+                out.shapes.iter().for_each(|c| texts(&c.shape, &mut shown));
+            }
+            shown.iter().any(|t| t == "The tool tip")
+        };
+        assert!(hover(&mut a), "on by default");
+        a.run("prefs.set", json!({"key": "showToolTips", "value": false})).unwrap();
+        assert!(!hover(&mut a), "off: no tool tip");
+        a.run("prefs.set", json!({"key": "showToolTips", "value": true})).unwrap();
+        assert!(hover(&mut a), "on again");
     }
 
     #[test]

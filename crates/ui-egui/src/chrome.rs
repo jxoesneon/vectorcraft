@@ -138,6 +138,9 @@ pub fn control_bar(app: &mut VectorcraftApp, ui: &mut Ui) {
                     _ => tl!(crate::panels::appearance::object_label(app)),
                 };
                 ui.label(egui::RichText::new(label).font(theme::semibold(12.0)).color(t.text));
+                if anchor_mode && widgets::icon_button(ui, "dc-pen-delete", "Remove Anchor Points", false, 24.0).clicked() {
+                    crate::menus::invoke(app, "path.removeAnchors", json!({}));
+                }
                 ui.add_space(6.0);
                 crate::place::control_bar_details(app, ui);
                 crate::toolbar::control_bar_options(app, ui);
@@ -214,7 +217,7 @@ pub fn control_bar(app: &mut VectorcraftApp, ui: &mut Ui) {
                         if k == "height" {
                             crate::panels::transform::constrain_link(app, ui);
                         }
-                        ui.label(egui::RichText::new(tl!(lbl)).size(12.0).color(t.text_dim));
+                        widgets::field_label(ui, egui::RichText::new(tl!(lbl)).size(12.0).color(t.text_dim));
                         if let Some(nv) = widgets::num_field(ui, ("cb", k), Some(v), units, 80.0) {
                             app.run("object.setBounds", json!({k: nv, "reference": 4, "proportional": link})).ok();
                         }

@@ -1,36 +1,62 @@
 //! Direct Selection (A) and Group Selection tools.
 //!
 //! Direct Selection: click an anchor to select it (Shift toggles), click a segment to select the
-//! path's anchors on that segment, drag to move selected anchors, drag a direction handle to
-//! reshape, marquee to select anchors, drag a live rectangle's corner widget to round its corners.
+//! path's anchors on that segment, drag to move selected anchors (the one pressed on snaps to
+//! anchors, segments and Smart Guides, or with them off Snap to Point; Shift keeps the move at 45°
+//! steps), drag a direction handle to
+//! reshape (Shift keeps it at 45° steps round its anchor, Alt moves it alone; smart guides snap
+//! it), marquee to select anchors, drag a live rectangle's corner widget to round its corners
+//! (the selected ones when anchors are selected; Alt-click cycles their kind, double-click opens
+//! the Corners dialog).
 //! Group Selection: click selects the leaf; each further click on it adds the next enclosing group.
-//! Both pick the key objects of a blend. Direct Selection also edits a blend's spine: drag its
-//! points (a key object on a point moves with it) and, once a point is clicked, its handles; and
-//! the points of selected gradient meshes and mesh envelopes and their handles ([`MeshEdit`]).
-//! Dragging a corner or an edge of area type's frame reshapes the type area (`text.reshapeArea`):
-//! the text reflows at its size.
+//! Both move objects selected as a whole as the Selection tool does, snapping alike.
+//! Both pick the key objects of a blend, and click or drag ruler guides ([`crate::rulerguide`]).
+//! Direct Selection also edits a blend's spine: drag its points (a key object on a point moves
+//! with it) and, once a point is clicked, its handles; and the points of selected gradient meshes
+//! and mesh envelopes and their handles ([`MeshEdit`]). Dragging a corner or an edge of area
+//! type's frame reshapes the type area (`text.reshapeArea`): the text reflows at its size.
+//! Dragging the brackets of selected type on a path moves or flips it ([`crate::pathtype`]).
+//!
+//! A press on the stroke of a path that isn't selected as a whole selects that segment's two anchors
+//! (the fill, or Alt, selects the whole path); dragging the segment bends it if it's curved, else
+//! moves its anchors.
 
 use std::borrow::Cow;
 
 use serde_json::{Value, json};
-use vectorcraft_doc::hit::hit_test;
+use vectorcraft_doc::hit::{HitKind, hit_test};
 use vectorcraft_doc::{AnchorRef, Node, NodeId, NodeKind};
 use vectorcraft_geom::{PathData, Point, Rect};
 
 use crate::bbox::move_delta;
-use crate::corners::{CornerDrag, over_widget};
+use crate::corners::{self, CornerDrag, over_widget};
+use crate::guides::{PointSnap, Targets};
 use crate::meshedit::MeshEdit;
-use crate::select::{is_area_type, matrix_json};
+use crate::pathtype::{self, BracketDrag, over_bracket};
+use crate::rulerguide::GuideEdit;
+use crate::select::{MoveSnap, is_area_type, matrix_json};
 use crate::{Action, Cursor, Mods, Overlay, PointerEvent, PointerKind, Tool, ToolContext};
 
 #[derive(Clone, Debug)]
 enum State {
     Idle,
+    /// Dragging the selected anchors, which move alike: `grab` is where the anchor pressed on (or
+    /// the pointer on a segment) was, the point that snaps.
     MoveAnchors {
         start: Point,
+        grab: Point,
         began: bool,
     },
     MoveObject {
+        start: Point,
+        began: bool,
+    },
+    /// Dragging a curved segment: it follows the pointer (`path.reshapeSegment`).
+    Segment {
+        id: NodeId,
+        si: usize,
+        seg: usize,
+        t: f64,
         start: Point,
         began: bool,
     },
@@ -46,6 +72,8 @@ enum State {
         add: bool,
     },
     Corner(CornerDrag),
+    /// Dragging a bracket of type on a path.
+    Bracket(BracketDrag),
     /// Dragging a point of a blend's spine from `from`.
     SpinePoint {
         id: NodeId,
@@ -77,11 +105,30 @@ pub struct DirectSelectionTool {
     /// The spine point last clicked (blend, anchor): its handles show and can be dragged.
     spine: Option<(NodeId, usize)>,
     mesh: MeshEdit,
+    /// Smart guides of the handle, anchors or objects being dragged.
+    guides: Vec<Overlay>,
+    /// What the dragged anchors snap to, gathered when the drag begins.
+    anchor_snap: Option<PointSnap>,
+    /// What the objects being moved snap to, gathered when the move begins.
+    move_snap: Option<MoveSnap>,
+    /// The anchor under the pointer (Highlight anchors on mouse over): its path, where it is.
+    hover: Option<(NodeId, Point)>,
+    guide: GuideEdit,
 }
 
 impl DirectSelectionTool {
     pub fn new(group: bool) -> Self {
-        Self { group, state: State::Idle, spine: None, mesh: MeshEdit::default() }
+        Self {
+            group,
+            state: State::Idle,
+            spine: None,
+            mesh: MeshEdit::default(),
+            guides: vec![],
+            anchor_snap: None,
+            move_snap: None,
+            hover: None,
+            guide: GuideEdit::default(),
+        }
     }
 }
 
@@ -148,12 +195,12 @@ fn anchor_owners(cx: &ToolContext, f: fn(&Node) -> bool) -> Vec<NodeId> {
     v
 }
 
-/// Anchor of any visible path or area type frame under `p`, topmost first.
-fn hit_anchor(cx: &ToolContext, p: Point, tol: f64) -> Option<(NodeId, usize, usize)> {
+/// Anchor of any visible path or area type frame under `p`, topmost first: (id, si, ai, where it is).
+fn hit_anchor(cx: &ToolContext, p: Point, tol: f64) -> Option<(NodeId, usize, usize, Point)> {
     let owners = anchor_owners(cx, |n| matches!(n.kind, NodeKind::Path { .. }) || is_area_type(n));
     owners.into_iter().find_map(|id| {
         let pd = cx.doc.node(id).and_then(editable_path)?;
-        pd.anchors().find(|(_, _, a)| a.p.distance(p) <= tol).map(|(si, ai, _)| (id, si, ai))
+        pd.anchors().find(|(_, _, a)| a.p.distance(p) <= tol).map(|(si, ai, a)| (id, si, ai, a.p))
     })
 }
 
@@ -167,8 +214,17 @@ fn hit_frame_edge(cx: &ToolContext, p: Point, tol: f64) -> Option<(NodeId, Vec<A
     })
 }
 
+/// Selection & Anchor Display → Show handles when multiple anchors are selected: off, handles show
+/// (and drag) only while a single anchor is selected.
+pub fn handles_shown(selection: &vectorcraft_doc::Selection, multiple: bool) -> bool {
+    multiple || selection.anchors.values().map(|set| set.len()).sum::<usize>() <= 1
+}
+
 /// Direction handle of a partially selected anchor under `p`: (id, si, ai, is_out).
 fn hit_handle(cx: &ToolContext, p: Point, tol: f64) -> Option<(NodeId, usize, usize, bool)> {
+    if !handles_shown(cx.selection, cx.handles_multiple) {
+        return None;
+    }
     for (id, set) in &cx.selection.anchors {
         let Some(pd) = cx.doc.node(*id).and_then(|n| n.path_data()) else { continue };
         for &(si, ai) in set {
@@ -188,18 +244,46 @@ fn anchors_json(v: &[AnchorRef]) -> Value {
     Value::Array(v.iter().map(|(s, a)| json!([s, a])).collect())
 }
 
+/// A segment of a path under the pointer.
+struct SegmentHit {
+    si: usize,
+    seg: usize,
+    t: f64,
+    /// The indexes of the segment's two anchors in its subpath.
+    anchors: [usize; 2],
+    curved: bool,
+}
+
+/// The segment of path `id` nearest to `p`, where the hit test found its stroke.
+fn segment_at(cx: &ToolContext, id: NodeId, p: Point) -> Option<SegmentHit> {
+    let pd = cx.doc.node(id)?.path_data()?;
+    let (si, seg, t, ..) = pd.nearest(p)?;
+    let sp = pd.subpaths.get(si)?;
+    let n = sp.anchors.len();
+    let (i0, i1) = (seg.checked_rem(n)?, (seg + 1).checked_rem(n)?);
+    let (a, b) = (sp.anchors.get(i0)?, sp.anchors.get(i1)?);
+    Some(SegmentHit { si, seg, t, anchors: [i0, i1], curved: a.has_out() || b.has_in() })
+}
+
 impl Tool for DirectSelectionTool {
     fn id(&self) -> &'static str {
         if self.group { "groupSelection" } else { "directSelection" }
     }
     fn busy(&self) -> bool {
-        !matches!(self.state, State::Idle)
+        !matches!(self.state, State::Idle) || self.guide.busy()
     }
     fn pointer(&mut self, cx: &ToolContext, ev: &PointerEvent) -> Vec<Action> {
+        if let Some(out) = self.guide.pointer(cx, ev) {
+            return out;
+        }
         let p = ev.pos;
-        let tol = cx.tol(4.0);
+        let tol = cx.pick_tol();
         match (ev.kind, self.state.clone()) {
             (PointerKind::Down, _) if self.group => {
+                if let Some(out) = self.guide.press(cx, ev) {
+                    self.state = State::Idle;
+                    return out;
+                }
                 let Some(h) = hit_test(cx.doc, p, cx.hit_options()) else {
                     self.state = State::Marquee { start: p, cur: p, add: ev.mods.shift };
                     return vec![];
@@ -220,9 +304,18 @@ impl Tool for DirectSelectionTool {
                     vec![Action::Exec("select.set".into(), json!({"ids": [target.0]}))]
                 }
             }
+            (PointerKind::DoubleClick, _) if !self.group => corners::double_click(cx, p).into_iter().collect(),
+            (PointerKind::Move, State::Idle) => {
+                self.hover = if self.group || !cx.highlight_anchors { None } else { hovered_anchor(cx, p) };
+                vec![]
+            }
             (PointerKind::Down, _) => {
-                if let Some(c) = CornerDrag::hit(cx, p) {
+                if let Some(c) = CornerDrag::hit(cx, ev) {
                     self.state = State::Corner(c);
+                    return vec![];
+                }
+                if let Some(b) = BracketDrag::hit(cx, ev) {
+                    self.state = State::Bracket(b);
                     return vec![];
                 }
                 if let Some(sel) = self.spine.filter(|(id, _)| cx.selection.contains(*id))
@@ -246,12 +339,12 @@ impl Tool for DirectSelectionTool {
                     self.state = State::SpinePoint { id, anchor, from, start: p, began: false };
                     return if cx.selection.contains(id) { vec![] } else { vec![Action::Exec("select.set".into(), json!({"ids": [id.0]}))] };
                 }
-                if let Some((id, si, ai)) = hit_anchor(cx, p, tol) {
+                if let Some((id, si, ai, grab)) = hit_anchor(cx, p, tol) {
                     if cx.doc.node(id).is_some_and(is_area_type) {
                         return self.press_type_area(cx, id, vec![(si, ai)], p, ev.mods.shift);
                     }
                     let already = cx.selection.partial(id).is_some_and(|s| s.contains(&(si, ai)));
-                    self.state = State::MoveAnchors { start: p, began: false };
+                    self.state = State::MoveAnchors { start: p, grab, began: false };
                     if ev.mods.shift {
                         return vec![Action::Exec("select.anchors".into(), json!({"id": id.0, "anchors": [[si, ai]], "mode": "toggle"}))];
                     }
@@ -263,8 +356,34 @@ impl Tool for DirectSelectionTool {
                 if let Some((id, anchors)) = hit_frame_edge(cx, p, tol) {
                     return self.press_type_area(cx, id, anchors, p, ev.mods.shift);
                 }
+                if let Some(out) = self.guide.press(cx, ev) {
+                    self.state = State::Idle;
+                    return out;
+                }
                 if let Some(h) = hit_test(cx.doc, p, cx.hit_options()) {
-                    // Clicking a segment/fill selects the whole leaf path (all anchors).
+                    // A segment of a path that isn't selected as a whole: its two anchors get
+                    // selected, and dragging it reshapes it if it's curved, else moves it. Alt picks
+                    // the whole path (and Alt-drag copies it), as with Group Selection.
+                    let whole = cx.selection.contains(h.leaf) && cx.selection.partial(h.leaf).is_none();
+                    if !whole
+                        && !ev.mods.shift
+                        && !ev.mods.alt
+                        && matches!(h.kind, HitKind::Stroke | HitKind::Outline)
+                        && let Some(s) = segment_at(cx, h.leaf, p)
+                    {
+                        let selected = cx.selection.partial(h.leaf).is_some_and(|sel| s.anchors.iter().all(|&ai| sel.contains(&(s.si, ai))));
+                        self.state = if s.curved {
+                            State::Segment { id: h.leaf, si: s.si, seg: s.seg, t: s.t, start: p, began: false }
+                        } else {
+                            State::MoveAnchors { start: p, grab: p, began: false }
+                        };
+                        if selected {
+                            return vec![];
+                        }
+                        let anchors: Vec<Value> = s.anchors.iter().map(|ai| json!([s.si, ai])).collect();
+                        return vec![Action::Exec("select.anchors".into(), json!({"id": h.leaf.0, "anchors": anchors, "mode": "set"}))];
+                    }
+                    // Clicking the fill selects the whole leaf path (all anchors).
                     self.state = State::MoveObject { start: p, began: false };
                     if ev.mods.shift {
                         return vec![Action::Exec("select.toggle".into(), json!({"id": h.leaf.0}))];
@@ -277,17 +396,42 @@ impl Tool for DirectSelectionTool {
                 self.state = State::Marquee { start: p, cur: p, add: ev.mods.shift };
                 vec![]
             }
-            (PointerKind::Drag, State::MoveAnchors { start, began }) => {
+            (PointerKind::Drag, State::MoveAnchors { start, grab, began }) => {
                 let mut out = vec![];
                 if !began {
                     if p.distance(start) < cx.tol(3.0) {
                         return out;
                     }
                     out.push(Action::Begin("Move".into()));
-                    self.state = State::MoveAnchors { start, began: true };
+                    self.state = State::MoveAnchors { start, grab, began: true };
+                    self.anchor_snap = Some(PointSnap::new(cx, || Targets::for_anchor_drag(cx.doc, cx.selection)));
                 }
-                let d = move_delta(start, p, ev.mods.shift);
+                let mut d = move_delta(start, p, ev.mods.shift);
+                // The grabbed anchor snaps and the others follow it; Shift keeps the angle instead.
+                self.guides.clear();
+                if !ev.mods.shift
+                    && let Some(snap) = &self.anchor_snap
+                {
+                    let (q, guides) = snap.snap(cx, grab + d);
+                    (d, self.guides) = (q - grab, guides);
+                }
                 out.push(Action::Preview("path.moveAnchors".into(), json!({"dx": d.x, "dy": d.y})));
+                out
+            }
+            (PointerKind::Drag, State::Segment { id, si, seg, t, start, began }) => {
+                let mut out = vec![];
+                if !began {
+                    if p.distance(start) < cx.tol(3.0) {
+                        return out;
+                    }
+                    out.push(Action::Begin("Reshape".into()));
+                    self.state = State::Segment { id, si, seg, t, start, began: true };
+                }
+                let d = p - start;
+                out.push(Action::Preview(
+                    "path.reshapeSegment".into(),
+                    json!({"id": id.0, "subpath": si, "segment": seg, "t": t, "dx": d.x, "dy": d.y}),
+                ));
                 out
             }
             (PointerKind::Drag, State::MoveObject { start, began }) => {
@@ -298,8 +442,12 @@ impl Tool for DirectSelectionTool {
                     }
                     out.push(Action::Begin("Move".into()));
                     self.state = State::MoveObject { start, began: true };
+                    self.move_snap = Some(MoveSnap::new(cx));
                 }
-                let d = move_delta(start, p, ev.mods.shift);
+                let mut d = move_delta(start, p, ev.mods.shift);
+                if let Some(snap) = &self.move_snap {
+                    (d, self.guides) = snap.snap(cx, start, d);
+                }
                 out.push(Action::Preview(
                     "object.transform".into(),
                     json!({"matrix": matrix_json(vectorcraft_geom::Affine::translate(d)), "copy": ev.mods.alt}),
@@ -320,9 +468,11 @@ impl Tool for DirectSelectionTool {
                 out
             }
             (PointerKind::Drag, State::Handle { id, si, ai, out }) => {
+                let (q, guides) = crate::guides::snap_handle(cx, (id, si, ai), p, ev.mods.shift);
+                self.guides = guides;
                 vec![Action::Preview(
                     "path.setHandle".into(),
-                    json!({"id": id.0, "subpath": si, "anchor": ai, "which": if out {"out"} else {"in"}, "x": p.x, "y": p.y, "independent": ev.mods.alt}),
+                    json!({"id": id.0, "subpath": si, "anchor": ai, "which": if out {"out"} else {"in"}, "x": q.x, "y": q.y, "independent": ev.mods.alt}),
                 )]
             }
             (PointerKind::Drag, State::SpinePoint { id, anchor, from, start, began }) => {
@@ -360,15 +510,31 @@ impl Tool for DirectSelectionTool {
                 self.state = State::Idle;
                 c.finish()
             }
+            (PointerKind::Drag, State::Bracket(mut b)) => {
+                let out = b.drag(cx, p, ev.mods.cmd);
+                self.state = State::Bracket(b);
+                out
+            }
+            (PointerKind::Up, State::Bracket(b)) => {
+                self.state = State::Idle;
+                b.finish()
+            }
             (
                 PointerKind::Up,
-                State::MoveAnchors { began, .. } | State::MoveObject { began, .. } | State::SpinePoint { began, .. } | State::TypeArea { began, .. },
+                State::MoveAnchors { began, .. }
+                | State::MoveObject { began, .. }
+                | State::Segment { began, .. }
+                | State::SpinePoint { began, .. }
+                | State::TypeArea { began, .. },
             ) => {
                 self.state = State::Idle;
+                self.guides.clear();
+                (self.anchor_snap, self.move_snap) = (None, None);
                 if began { vec![Action::Commit] } else { vec![] }
             }
             (PointerKind::Up, State::Handle { .. } | State::SpineHandle { .. }) => {
                 self.state = State::Idle;
+                self.guides.clear();
                 vec![Action::Commit]
             }
             (PointerKind::Up, State::Marquee { start, add, .. }) => {
@@ -403,7 +569,15 @@ impl Tool for DirectSelectionTool {
                 out.extend(self.mesh.overlays(cx));
                 if !self.group {
                     out.extend(frame_overlays(cx));
+                    out.extend(pathtype::overlays(cx));
                 }
+                if matches!(self.state, State::Handle { .. } | State::MoveAnchors { .. } | State::MoveObject { .. }) {
+                    out.extend(self.guides.iter().cloned());
+                }
+                if let Some((id, p)) = self.hover.filter(|_| matches!(self.state, State::Idle)) {
+                    out.push(Overlay::Anchor { p, color: cx.doc.layer_color(id), filled: false, size: 8.0 });
+                }
+                out.extend(self.guide.overlays(cx));
                 out
             }
         }
@@ -412,8 +586,23 @@ impl Tool for DirectSelectionTool {
         if !self.group && (matches!(self.state, State::Corner(_)) || over_widget(cx, p)) {
             return Cursor::CornerRadius;
         }
-        Cursor::ArrowHollow
+        if !self.group && (matches!(self.state, State::Bracket(_)) || over_bracket(cx, p)) {
+            return Cursor::PathBracket;
+        }
+        // A press on the highlighted anchor picks it, not the guide.
+        self.guide.cursor(cx, p).filter(|_| self.hover.is_none() || self.guide.busy()).unwrap_or(Cursor::ArrowHollow)
     }
+}
+
+/// The anchor within the selection tolerance of `p`, of a selected path or the path under `p`:
+/// what Highlight anchors on mouse over marks (a press there picks it).
+fn hovered_anchor(cx: &ToolContext, p: Point) -> Option<(NodeId, Point)> {
+    let under = hit_test(cx.doc, p, cx.hit_options()).map(|h| h.leaf);
+    let tol = cx.pick_tol();
+    cx.selection.objects.iter().copied().chain(under).find_map(|id| {
+        let path = cx.doc.node(id).and_then(editable_path)?;
+        path.anchors().find(|(_, _, a)| a.p.distance(p) <= tol).map(|(_, _, a)| (id, a.p))
+    })
 }
 
 /// The frame anchors of the selected area type, which Direct Selection drags.
@@ -462,6 +651,26 @@ mod tests {
     use crate::testutil::*;
     use vectorcraft_doc::Selection;
 
+    /// #414: a ruler guide is picked over the art, but an anchor on it is picked first.
+    #[test]
+    fn direct_and_group_selection_pick_ruler_guides() {
+        let (mut d, id) = doc_with_rect();
+        d.guides.push(vectorcraft_doc::Guide { vertical: true, pos: 100.0 });
+        let (s, p) = (Selection::default(), paint());
+        let c = cx(&d, &s, &p);
+        let down = |t: &mut DirectSelectionTool, y: f64| t.pointer(&c, &PointerEvent::new(PointerKind::Down, 100.0, y));
+        let pick = vec![Action::Exec("guide.select".into(), json!({"indexes": [0]}))];
+        for group in [false, true] {
+            let mut t = DirectSelectionTool::new(group);
+            assert_eq!(down(&mut t, 150.0), pick, "on the rect's edge (group: {group})");
+            assert!(t.busy());
+            t.pointer(&c, &PointerEvent::new(PointerKind::Up, 100.0, 150.0));
+            assert_eq!(t.cursor(&c, Point::new(101.0, 300.0), Mods::default()), Cursor::ResizeH);
+        }
+        let mut t = DirectSelectionTool::new(false);
+        assert_eq!(down(&mut t, 100.0), vec![Action::Exec("select.anchors".into(), json!({"id": id.0, "anchors": [[0, 0]], "mode": "set"}))]);
+    }
+
     /// A blend of two 20 pt squares centred on (110, 310) and (210, 310), selected.
     fn blend_doc() -> (vectorcraft_doc::Document, NodeId, NodeId) {
         let (mut d, _) = doc_with_rect();
@@ -474,6 +683,30 @@ mod tests {
         let b = vectorcraft_doc::Node::new(g, NodeKind::Blend { children: vec![key(k1, 100.0), key(k2, 200.0)], spec: Default::default() });
         d.insert(Some(l), 1, b).unwrap();
         (d, g, k1)
+    }
+
+    /// Highlight anchors on mouse over (#394): the anchor under the pointer, within the selection
+    /// tolerance, shows enlarged; none with the preference off or away from anchors.
+    #[test]
+    fn the_anchor_under_the_pointer_is_highlighted() {
+        let (d, id) = doc_with_rect();
+        let s = Selection::default();
+        let p = paint();
+        let big = |t: &DirectSelectionTool, cx: &ToolContext| {
+            t.overlays(cx).into_iter().find_map(|o| match o {
+                Overlay::Anchor { p, size, .. } if size > 5.0 => Some(p),
+                _ => None,
+            })
+        };
+        let mut t = DirectSelectionTool::new(false);
+        let on = cx(&d, &s, &p);
+        t.pointer(&on, &PointerEvent::new(PointerKind::Move, 102.0, 101.0));
+        assert_eq!(big(&t, &on), Some(Point::new(100.0, 100.0)), "the corner of {id:?}");
+        t.pointer(&on, &PointerEvent::new(PointerKind::Move, 150.0, 100.0));
+        assert_eq!(big(&t, &on), None, "mid-segment: no anchor");
+        let off = ToolContext { highlight_anchors: false, ..cx(&d, &s, &p) };
+        t.pointer(&off, &PointerEvent::new(PointerKind::Move, 102.0, 101.0));
+        assert_eq!(big(&t, &off), None, "off");
     }
 
     #[test]
@@ -560,5 +793,149 @@ mod tests {
         t.pointer(&cx, &PointerEvent::new(PointerKind::Drag, 250.0, 150.0));
         let a = t.pointer(&cx, &PointerEvent::new(PointerKind::Up, 250.0, 150.0));
         assert_eq!(a, vec![Action::Exec("select.anchorsMany".into(), json!({"items": [{"id": id.0, "anchors": [[0, 1]]}], "add": false}))]);
+    }
+    /// An open path from (100, 300) to (200, 300) arching up through (150, 262.5).
+    fn arch_doc() -> (vectorcraft_doc::Document, NodeId) {
+        let (mut d, _) = doc_with_rect();
+        let l = d.layers[0].id;
+        let id = d.alloc_id();
+        let mut sp = vectorcraft_geom::SubPath::polyline(&[Point::new(100.0, 300.0), Point::new(200.0, 300.0)], false);
+        sp.anchors[0].h_out = Point::new(100.0, 250.0);
+        sp.anchors[1].h_in = Point::new(200.0, 250.0);
+        d.insert(Some(l), 1, vectorcraft_doc::Node::path(id, PathData::single(sp), vectorcraft_doc::Appearance::default_art())).unwrap();
+        (d, id)
+    }
+
+    #[test]
+    fn dragging_a_curved_segment_reshapes_it_and_a_straight_one_moves_its_anchors() {
+        let (d, arch) = arch_doc();
+        let s = Selection::default();
+        let p = paint();
+        let cx = cx(&d, &s, &p);
+        let mut t = DirectSelectionTool::new(false);
+        // The arch: its two anchors get selected, and the drag bends it.
+        let a = t.pointer(&cx, &PointerEvent::new(PointerKind::Down, 150.0, 262.5));
+        assert_eq!(a, vec![Action::Exec("select.anchors".into(), json!({"id": arch.0, "anchors": [[0, 0], [0, 1]], "mode": "set"}))]);
+        let a = t.pointer(&cx, &PointerEvent::new(PointerKind::Drag, 150.0, 242.5));
+        assert_eq!(a[0], Action::Begin("Reshape".into()));
+        let Action::Preview(cmd, v) = &a[1] else { panic!("{a:?}") };
+        assert_eq!(
+            (cmd.as_str(), v["id"].clone(), v["segment"].clone(), v["dx"].clone(), v["dy"].clone()),
+            ("path.reshapeSegment", json!(arch.0), json!(0), json!(0.0), json!(-20.0))
+        );
+        assert!((v["t"].as_f64().unwrap() - 0.5).abs() < 0.01, "{v}");
+        assert_eq!(t.pointer(&cx, &PointerEvent::new(PointerKind::Up, 150.0, 242.5)), vec![Action::Commit]);
+        // A straight edge of the rectangle: its two anchors get selected and move.
+        let a = t.pointer(&cx, &PointerEvent::new(PointerKind::Down, 150.0, 101.0));
+        assert!(matches!(&a[..], [Action::Exec(c, v)] if c == "select.anchors" && v["anchors"] == json!([[0, 0], [0, 1]])), "{a:?}");
+        let a = t.pointer(&cx, &PointerEvent::new(PointerKind::Drag, 150.0, 81.0));
+        assert_eq!(a[1], Action::Preview("path.moveAnchors".into(), json!({"dx": 0.0, "dy": -20.0})));
+        t.pointer(&cx, &PointerEvent::new(PointerKind::Up, 150.0, 81.0));
+        // Alt on the stroke picks the whole path, and Alt-drag copies it.
+        let alt = Mods { alt: true, ..Default::default() };
+        let a = t.pointer(&cx, &PointerEvent::new(PointerKind::Down, 150.0, 101.0).with_mods(alt));
+        assert!(matches!(&a[..], [Action::Exec(c, _)] if c == "select.set"), "{a:?}");
+        let a = t.pointer(&cx, &PointerEvent::new(PointerKind::Drag, 150.0, 81.0).with_mods(alt));
+        assert!(matches!(&a[..], [Action::Begin(_), Action::Preview(c, v)] if c == "object.transform" && v["copy"] == true), "{a:?}");
+        t.pointer(&cx, &PointerEvent::new(PointerKind::Up, 150.0, 81.0).with_mods(alt));
+        // The fill still selects the whole path, and a path selected as a whole still moves whole.
+        let a = t.pointer(&cx, &PointerEvent::new(PointerKind::Down, 150.0, 150.0));
+        assert!(matches!(&a[..], [Action::Exec(c, _)] if c == "select.set"), "{a:?}");
+        t.pointer(&cx, &PointerEvent::new(PointerKind::Up, 150.0, 150.0));
+        let rect = d.layers[0].children().unwrap()[0].id;
+        let mut whole = Selection::default();
+        whole.set([rect]);
+        let cx = crate::testutil::cx(&d, &whole, &p);
+        assert_eq!(t.pointer(&cx, &PointerEvent::new(PointerKind::Down, 150.0, 101.0)), vec![]);
+        let a = t.pointer(&cx, &PointerEvent::new(PointerKind::Drag, 150.0, 81.0));
+        assert!(matches!(&a[..], [Action::Begin(_), Action::Preview(c, _)] if c == "object.transform"), "{a:?}");
+    }
+
+    /// [`doc_with_rect`] (A, 100..200) and a second square B, 300..400: (A, B).
+    fn two_squares() -> (vectorcraft_doc::Document, NodeId, NodeId) {
+        let (mut d, a) = doc_with_rect();
+        let l = d.layers[0].id;
+        let b = d.alloc_id();
+        let sq = vectorcraft_geom::shapes::rectangle(Rect::new(300.0, 300.0, 400.0, 400.0));
+        d.insert(Some(l), 1, vectorcraft_doc::Node::path(b, sq, vectorcraft_doc::Appearance::default_art())).unwrap();
+        (d, a, b)
+    }
+
+    /// The anchors `anchors` of path `id` direct-selected.
+    fn anchors_of(id: NodeId, anchors: &[AnchorRef]) -> Selection {
+        let mut s = Selection::default();
+        s.set([id]);
+        s.anchors.insert(id, anchors.iter().copied().collect());
+        s
+    }
+
+    /// Press at `from`, drag to `to`: the move the drag previews, and the smart guide labels shown.
+    fn drag(t: &mut DirectSelectionTool, cx: &ToolContext, from: (f64, f64), to: (f64, f64), mods: Mods) -> (Value, Vec<String>) {
+        t.pointer(cx, &PointerEvent::new(PointerKind::Down, from.0, from.1).with_mods(mods));
+        let a = t.pointer(cx, &PointerEvent::new(PointerKind::Drag, to.0, to.1).with_mods(mods));
+        let Some(Action::Preview(_, v)) = a.last() else { panic!("{a:?}") };
+        let labels = t
+            .overlays(cx)
+            .into_iter()
+            .filter_map(|o| match o {
+                Overlay::Label { text, .. } => Some(text),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(t.pointer(cx, &PointerEvent::new(PointerKind::Up, to.0, to.1).with_mods(mods)), vec![Action::Commit]);
+        assert!(t.overlays(cx).iter().all(|o| !matches!(o, Overlay::Label { .. })), "the guides go with the drag");
+        (v.clone(), labels)
+    }
+
+    /// A dragged anchor lands on another path's anchor or segment, lines up with the other anchors
+    /// of its own path, and with several selected the one pressed on snaps, the others following.
+    #[test]
+    fn dragged_anchors_snap_to_points_segments_and_smart_guides() {
+        let (d, _, b) = two_squares();
+        let p = paint();
+        let none = Mods::default();
+        let one = anchors_of(b, &[(0, 0)]);
+        let c = cx(&d, &one, &p);
+        let mut t = DirectSelectionTool::new(false);
+        // B's top-left corner, pressed 1 pt off, onto A's bottom-right one.
+        let (v, labels) = drag(&mut t, &c, (301.0, 301.0), (203.0, 199.0), none);
+        assert_eq!((v, labels), (json!({"dx": -100.0, "dy": -100.0}), vec!["anchor".to_string()]));
+        // Onto A's right side.
+        let (v, labels) = drag(&mut t, &c, (300.0, 300.0), (203.0, 150.0), none);
+        assert_eq!((v, labels), (json!({"dx": -100.0, "dy": -150.0}), vec!["path".to_string()]));
+        // In line with B's own bottom-left corner, which stays put.
+        let (v, labels) = drag(&mut t, &c, (300.0, 300.0), (303.0, 330.0), none);
+        assert_eq!((v, labels), (json!({"dx": 0.0, "dy": 30.0}), vec!["align".to_string()]));
+        // Shift keeps the move at 45° steps, unsnapped.
+        let (v, labels) = drag(&mut t, &c, (300.0, 300.0), (203.0, 199.0), Mods { shift: true, ..none });
+        let s = move_delta(Point::new(300.0, 300.0), Point::new(203.0, 199.0), true);
+        assert_eq!((v, labels), (json!({"dx": s.x, "dy": s.y}), vec![]));
+        // Two anchors: the one pressed on (B's top-right) lands on A's corner.
+        let two = anchors_of(b, &[(0, 0), (0, 1)]);
+        let c = cx(&d, &two, &p);
+        let (v, _) = drag(&mut t, &c, (400.0, 300.0), (202.0, 198.0), none);
+        assert_eq!(v, json!({"dx": -200.0, "dy": -100.0}));
+        // Smart Guides off: Snap to Point pulls within its distance (2 px) only.
+        let c = ToolContext { smart_guides: false, ..cx(&d, &one, &p) };
+        assert_eq!(drag(&mut t, &c, (300.0, 300.0), (201.0, 199.0), none).0, json!({"dx": -100.0, "dy": -100.0}));
+        assert_eq!(drag(&mut t, &c, (300.0, 300.0), (203.0, 199.0), none).0, json!({"dx": -97.0, "dy": -101.0}));
+        let c = ToolContext { smart_guides: false, snap_to_point: false, ..cx(&d, &one, &p) };
+        assert_eq!(drag(&mut t, &c, (300.0, 300.0), (201.0, 199.0), none).0, json!({"dx": -99.0, "dy": -101.0}));
+    }
+
+    /// Group Selection (and Direct Selection on a whole path) moves objects snapping as the
+    /// Selection tool does: B's left side lines up with A's right one.
+    #[test]
+    fn moved_objects_snap_with_smart_guides() {
+        let (d, _, b) = two_squares();
+        let p = paint();
+        let mut s = Selection::default();
+        s.set([b]);
+        let c = cx(&d, &s, &p);
+        for group in [true, false] {
+            let mut t = DirectSelectionTool::new(group);
+            let (v, _) = drag(&mut t, &c, (350.0, 350.0), (253.0, 351.0), Mods::default());
+            assert_eq!(v["matrix"], json!([1.0, 0.0, 0.0, 1.0, -100.0, 1.0]), "group: {group}");
+        }
     }
 }

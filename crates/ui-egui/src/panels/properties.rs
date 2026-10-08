@@ -4,7 +4,7 @@ use egui::Ui;
 use serde_json::json;
 use vectorcraft_doc::{NodeKind, Unit};
 
-use super::{first_selected, pstate, set_pstate};
+use super::{corner_radius, first_selected, pstate, set_pstate};
 use crate::theme::Tokens;
 use crate::widgets::{self, dim_label, divider, section_header};
 use crate::{VectorcraftApp, icons};
@@ -16,6 +16,7 @@ pub fn show(app: &mut VectorcraftApp, ui: &mut Ui) {
         return;
     };
     let n_sel = st.selection.len();
+    let anchor_mode = !st.selection.anchors.is_empty();
     let first = first_selected(app);
     let label = match (&first, n_sel) {
         (None, _) => tl!("Document").to_string(),
@@ -96,6 +97,10 @@ pub fn show(app: &mut VectorcraftApp, ui: &mut Ui) {
     }
     if multi_color(app, ui.ctx()) {
         actions.push((tl!("Recolor"), "ui.recolorDialog"));
+    }
+    // One column: the label is wider than half of the narrowest dock.
+    if anchor_mode && widgets::flat_button(ui, "Remove Anchor Points", ui.available_width()).clicked() {
+        crate::menus::invoke(app, "path.removeAnchors", json!({}));
     }
     actions.push((tl!("Offset Path"), "object.path.offsetPath"));
     actions.push((tl!("Simplify"), "object.path.simplify"));
@@ -294,7 +299,8 @@ pub fn transform_section(app: &mut VectorcraftApp, ui: &mut Ui) {
         super::transform::constrain_link(app, ui);
     });
     ui.horizontal(|ui| {
-        icons::icon(ui, "rotate-ccw", 16.0, Tokens::get(ui.ctx()).icon);
+        let icon = icons::icon(ui, "rotate-ccw", 16.0, Tokens::get(ui.ctx()).icon);
+        crate::scrub::note_label(ui, icon.rect);
         // The bounding box's angle: a new value turns the selection to it.
         if let Some(a) = widgets::plain_field(ui, "rot", bx.angle, "°", 2, 70.0) {
             app.run("object.rotate", json!({"angle": a, "absolute": true})).ok();
@@ -312,10 +318,10 @@ pub fn transform_section(app: &mut VectorcraftApp, ui: &mut Ui) {
         && let NodeKind::Path { live: Some(live), .. } = &n.kind
     {
         match live {
-            vectorcraft_doc::LiveShape::Rectangle { radii, .. } => {
+            vectorcraft_doc::LiveShape::Rectangle { .. } => {
                 ui.horizontal(|ui| {
                     dim_label(ui, tl!("Corner Radius:"));
-                    if let Some(r) = widgets::num_field(ui, "radius", Some(radii[0]), units, 80.0) {
+                    if let Some(r) = widgets::num_field(ui, "radius", corner_radius(app, &n, live), units, 80.0) {
                         app.run("object.setLiveShape", json!({"radius": r})).ok();
                     }
                 });
@@ -340,7 +346,7 @@ fn appearance_section(app: &mut VectorcraftApp, ui: &mut Ui) {
     for (label, is_fill) in [(tl!("Fill"), true), (tl!("Stroke"), false)] {
         ui.horizontal(|ui| {
             super::paint_chip(app, ui, !is_fill, 22.0, false);
-            ui.label(egui::RichText::new(label).size(12.0));
+            widgets::field_label(ui, egui::RichText::new(label).size(12.0));
             if !is_fill {
                 ui.add_space(8.0);
                 if let Some(w) = widgets::num_field(ui, "ap-w", weight, app.session.stroke_unit(), 70.0) {
@@ -352,7 +358,7 @@ fn appearance_section(app: &mut VectorcraftApp, ui: &mut Ui) {
         });
     }
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(tl!("Opacity")).size(12.0));
+        widgets::field_label(ui, egui::RichText::new(tl!("Opacity")).size(12.0));
         ui.add_space(8.0);
         if let Some(o) = widgets::plain_field(ui, "ap-op", n.opacity as f64 * 100.0, "%", 0, 64.0) {
             app.run("object.setProps", json!({"opacity": o.clamp(0.0, 100.0)})).ok();
@@ -382,8 +388,11 @@ pub fn type_sections(app: &mut VectorcraftApp, ui: &mut Ui) {
     };
     let s = tx.first_style();
     section_header(ui, tl!("Character"));
-    if let Some(f) = widgets::font_dropdown(ui, "font", &s.font_family, ui.available_width() - 4.0) {
-        app.run("text.setStyle", json!({ "font": f })).ok();
+    let sample = crate::font_menu::sample_text(app);
+    if let Some(pick) =
+        crate::font_menu::font_menu(ui, "font", &s.font_family, ui.available_width() - 4.0, sample.as_deref(), crate::font_menu::MenuLook::of(app))
+    {
+        crate::font_menu::apply(app, ui.ctx(), pick);
     }
     ui.horizontal(|ui| {
         dim_label(ui, tl!("Size"));

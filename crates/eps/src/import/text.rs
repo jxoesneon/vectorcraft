@@ -165,6 +165,20 @@ impl Interp<'_> {
                 self.pop()?;
                 self.show(&s)?;
             }
+            CShow => {
+                // The procedure shows or places each character: it gets its code and width.
+                let s = self.pop_str()?.to_vec();
+                let proc = self.pop_proc()?;
+                for b in s {
+                    let (_, _, v) = self.set_type(&[b], Point::ZERO)?;
+                    self.push(Obj::Int(i64::from(b)))?;
+                    self.push_num(v.x)?;
+                    self.push_num(v.y)?;
+                    if !self.body(&proc)? {
+                        break;
+                    }
+                }
+            }
             GlyphShow => {
                 let name = self.pop()?.text().unwrap_or_else(|| Rc::from(""));
                 let ch = glyph_char(&name);
@@ -224,6 +238,10 @@ impl Interp<'_> {
     /// `s` (read as Latin-1) set in the current font at user point `at`: point type placed there,
     /// its layout in text space, and how far it moves the current point (user space).
     fn set_type(&mut self, s: &[u8], at: Point) -> Res<(TextObject, TextLayout, Vec2)> {
+        // Laying out type costs about as much as 300 operations, and 64 more a character
+        // (measured), so `{ (a) stringwidth pop pop } loop` or `cshow` on a long string ends
+        // within the budget like any other loop instead of running for minutes.
+        self.spend((s.len() as u64).saturating_mul(64).saturating_add(300))?;
         let (name, f1) = self.font()?;
         // Text space (y down, `size` points an em) onto the document.
         let m = self.xf() * Affine::translate(at.to_vec2()) * f1;

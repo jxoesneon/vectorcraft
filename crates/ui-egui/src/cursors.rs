@@ -61,6 +61,10 @@ fn pen(p: &Painter, o: Pos2, badge: &str) {
         }
         "-" => line(p, b + vec2(0.0, 3.0), b + vec2(6.0, 3.0)),
         "/" => line(p, b + vec2(0.0, 6.0), b + vec2(5.0, 0.0)),
+        "^" => {
+            line(p, b + vec2(0.0, 6.0), b + vec2(3.0, 0.0));
+            line(p, b + vec2(3.0, 0.0), b + vec2(6.0, 6.0));
+        }
         "*" => {
             line(p, b + vec2(0.0, 0.0), b + vec2(6.0, 6.0));
             line(p, b + vec2(6.0, 0.0), b + vec2(0.0, 6.0));
@@ -105,6 +109,21 @@ fn corner_radius(p: &Painter, o: Pos2) {
     pts.push(b + vec2(10.0, 0.0));
     p.add(Shape::line(pts.clone(), Stroke::new(3.0, HALO)));
     p.add(Shape::line(pts, Stroke::new(1.2, INK)));
+}
+
+/// Over a bracket of type on a path: the arrow with a bracket (a stem standing on a baseline,
+/// with a foot) below right.
+fn path_bracket(p: &Painter, o: Pos2) {
+    arrow(p, o, false);
+    let b = o + vec2(13.0, 13.0);
+    let stem = [b + vec2(3.0, 0.0), b + vec2(3.0, 10.0)];
+    let foot = [b + vec2(3.0, 0.0), b + vec2(7.0, 0.0)];
+    let base = [b + vec2(0.0, 8.0), b + vec2(10.0, 8.0)];
+    for (w, c) in [(3.0, HALO), (1.2, INK)] {
+        for l in [stem, foot, base] {
+            p.line_segment(l, Stroke::new(w, c));
+        }
+    }
 }
 
 /// The gradient annotator's stop cursors: the arrow with a plus (add a stop) or minus (delete it)
@@ -182,6 +201,17 @@ fn blend(p: &Painter, o: Pos2, badge: Cursor) {
     poly(p, vec![b, b + vec2(7.0, 0.0), b + vec2(7.0, 7.0), b + vec2(0.0, 7.0)], fill, INK);
 }
 
+/// The Shape Builder: a crosshair with a plus badge below right of the hotspot (merge mode), or a
+/// minus (erase mode).
+fn shape_builder(p: &Painter, o: Pos2, erase: bool) {
+    crosshair(p, o);
+    let c = o + vec2(12.0, 12.0);
+    line(p, c - vec2(3.5, 0.0), c + vec2(3.5, 0.0));
+    if !erase {
+        line(p, c - vec2(0.0, 3.5), c + vec2(0.0, 3.5));
+    }
+}
+
 /// Paint cursor `c` at `p` on the given (foreground) painter. Returns false for cursors that should
 /// stay system cursors (hand, zoom, busy states).
 pub fn paint(painter: &Painter, c: Cursor, p: Pos2) -> bool {
@@ -204,6 +234,7 @@ pub fn paint(painter: &Painter, c: Cursor, p: Pos2) -> bool {
         Cursor::PenDelete => pen(painter, p, "-"),
         Cursor::PenClose => pen(painter, p, "o"),
         Cursor::PenContinue => pen(painter, p, "/"),
+        Cursor::PenConvert => pen(painter, p, "^"),
         Cursor::Text => ibeam(painter, p),
         Cursor::AddStop => stop_badge(painter, p, true),
         Cursor::RemoveStop => stop_badge(painter, p, false),
@@ -216,6 +247,9 @@ pub fn paint(painter: &Painter, c: Cursor, p: Pos2) -> bool {
         Cursor::WidthAdd => width(painter, p, "+"),
         Cursor::WidthPoint => width(painter, p, "point"),
         Cursor::Blend | Cursor::BlendObject | Cursor::BlendAnchor => blend(painter, p, c),
+        Cursor::PathBracket => path_bracket(painter, p),
+        Cursor::ShapeBuilder => shape_builder(painter, p, false),
+        Cursor::ShapeBuilderErase => shape_builder(painter, p, true),
         _ => return false,
     }
     let _ = pos2;

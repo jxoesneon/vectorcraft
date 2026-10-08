@@ -255,6 +255,9 @@ pub struct UiState {
     /// Last tool shown in each toolbar slot (keyed by the slot's first tool id).
     #[serde(default)]
     pub slot_tool: std::collections::BTreeMap<String, String>,
+    /// Tool flyouts torn off the toolbar into floating panels.
+    #[serde(default)]
+    pub floating_flyouts: Vec<FloatingFlyout>,
     pub status_bar: bool,
     pub dock: bool,
     pub view: ViewFlags,
@@ -298,6 +301,9 @@ pub struct UiState {
     /// Type → Recent Fonts, most recent first.
     #[serde(default)]
     pub recent_fonts: Vec<String>,
+    /// Families starred in the font menus (the ★ filter shows only these).
+    #[serde(default)]
+    pub favorite_fonts: Vec<String>,
     /// Engine preferences (Edit → Preferences), persisted alongside the UI state.
     #[serde(default)]
     pub engine_prefs: Value,
@@ -339,6 +345,12 @@ pub struct UiState {
     /// becoming active, leaves it.
     #[serde(skip)]
     pub home: Option<(Option<u64>, usize)>,
+    /// Layers panel › Panel Options… (row size, thumbnails, Show Layers Only).
+    #[serde(default)]
+    pub layers_panel: crate::panels::layers::PanelOptions,
+    /// The Layers panel's open rows, per open document (`DocState::uid` → node ids).
+    #[serde(skip)]
+    pub layers_expanded: std::collections::HashMap<u64, std::collections::HashSet<u64>>,
     /// The desktop window's size, position and maximized state, saved when the app quits and
     /// restored at the next launch (the desktop host reads and writes it; none on the web).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -359,6 +371,15 @@ pub struct WindowGeometry {
     pub maximized: bool,
 }
 
+/// A tool group's flyout torn off the toolbar: it floats as its own panel until its × puts it back.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FloatingFlyout {
+    /// The group's tools in flyout order; the first one names the toolbar slot.
+    pub tools: Vec<String>,
+    /// Top-left corner in screen points.
+    pub pos: [f32; 2],
+}
+
 impl UiState {
     /// Clear transient state after loading saved preferences.
     pub fn sanitized(mut self) -> Self {
@@ -371,6 +392,12 @@ impl UiState {
         if self.group_tool.len() != vectorcraft_tools::TOOL_GROUPS.len() {
             self.group_tool = UiState::default().group_tool;
         }
+        // One strip per group, of known tools (a hand-edited preferences file).
+        let mut seen = std::collections::BTreeSet::new();
+        self.floating_flyouts.retain_mut(|f| {
+            f.tools.retain(|id| vectorcraft_tools::tool_info(id).is_some());
+            f.tools.first().is_some_and(|k| seen.insert(k.clone()))
+        });
         self
     }
 }
@@ -389,6 +416,7 @@ impl Default for UiState {
             toolbar_advanced: false,
             task_bar: true,
             slot_tool: Default::default(),
+            floating_flyouts: vec![],
             status_bar: true,
             dock: true,
             view: ViewFlags::default(),
@@ -410,6 +438,7 @@ impl Default for UiState {
             custom_workspaces: vec![],
             recent_files: vec![],
             recent_fonts: vec![],
+            favorite_fonts: vec![],
             engine_prefs: Value::Null,
             color_guide: Default::default(),
             library_panel: None,
@@ -422,6 +451,8 @@ impl Default for UiState {
             eps_options: Value::Null,
             dxf_import: Value::Null,
             home: None,
+            layers_panel: Default::default(),
+            layers_expanded: Default::default(),
             window: None,
         }
     }
